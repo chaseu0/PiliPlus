@@ -7,7 +7,6 @@ import 'package:PiliPlus/models_new/live/live_feed_index/card_data_list_item.dar
 import 'package:PiliPlus/pages/live_room/intel/model.dart';
 import 'package:PiliPlus/services/live_intel_bus.dart';
 import 'package:PiliPlus/services/request_debug.dart';
-import 'package:PiliPlus/utils/extension/iterable_ext.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:dio/dio.dart';
@@ -72,6 +71,24 @@ class LiveIntelController extends GetxController {
     roomStatuses,
     selector: (item) => item.trueOnline,
   );
+
+  LiveIntelRoomStatus? _findStatusByRoomId(int targetRoomId) {
+    for (final item in roomStatuses) {
+      if (item.roomId == targetRoomId) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  LiveIntelRoomStatus? _findStatusByUid(int uid) {
+    for (final item in roomStatuses) {
+      if (item.uid == uid) {
+        return item;
+      }
+    }
+    return null;
+  }
 
   @override
   void onInit() {
@@ -367,9 +384,7 @@ class LiveIntelController extends GetxController {
       if (res case Success(:final response)) {
         response.forEach((key, value) {
           final uid = _safeInt(value['uid']) ?? int.tryParse(key);
-          final status = roomStatuses.firstWhereOrNull(
-            (item) => item.uid == uid,
-          );
+          final status = uid == null ? null : _findStatusByUid(uid);
           if (status == null) {
             return;
           }
@@ -386,7 +401,7 @@ class LiveIntelController extends GetxController {
   }
 
   Future<void> _captureSingleRoom(int targetRoomId) async {
-    final status = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+    final status = _findStatusByRoomId(targetRoomId);
     if (status == null) {
       return;
     }
@@ -406,7 +421,7 @@ class LiveIntelController extends GetxController {
   }
 
   Future<void> _fetchOnlineMetric(int targetRoomId) async {
-    final status = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+    final status = _findStatusByRoomId(targetRoomId);
     if (status == null || status.uid == 0) {
       return;
     }
@@ -417,7 +432,7 @@ class LiveIntelController extends GetxController {
       options: _debugOptions('高能观众 ${status.roomId}'),
     );
     if (res case Success(:final response)) {
-      final latest = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+      final latest = _findStatusByRoomId(targetRoomId);
       if (latest == null) {
         return;
       }
@@ -430,7 +445,7 @@ class LiveIntelController extends GetxController {
   }
 
   Future<void> _fetchFollowerMetric(int targetRoomId) async {
-    final status = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+    final status = _findStatusByRoomId(targetRoomId);
     if (status == null || status.uid == 0) {
       return;
     }
@@ -439,7 +454,7 @@ class LiveIntelController extends GetxController {
       options: _debugOptions('主播信息 ${status.uid}'),
     );
     if (res case Success(:final response)) {
-      final latest = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+      final latest = _findStatusByRoomId(targetRoomId);
       if (latest == null) {
         return;
       }
@@ -452,7 +467,7 @@ class LiveIntelController extends GetxController {
   }
 
   Future<void> _fetchGuardMetric(int targetRoomId) async {
-    final status = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+    final status = _findStatusByRoomId(targetRoomId);
     if (status == null || status.uid == 0) {
       return;
     }
@@ -464,7 +479,7 @@ class LiveIntelController extends GetxController {
     );
     if (res case Success(:final response)) {
       final info = response['info'];
-      final latest = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+      final latest = _findStatusByRoomId(targetRoomId);
       if (latest == null) {
         return;
       }
@@ -477,7 +492,7 @@ class LiveIntelController extends GetxController {
   }
 
   Future<void> _fetchHistoryComments(int targetRoomId) async {
-    final status = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+    final status = _findStatusByRoomId(targetRoomId);
     if (status == null) {
       return;
     }
@@ -486,7 +501,7 @@ class LiveIntelController extends GetxController {
       options: _debugOptions('历史弹幕 ${status.roomId}'),
     );
     if (res case Success(:final response)) {
-      final latest = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+      final latest = _findStatusByRoomId(targetRoomId);
       if (latest == null) {
         return;
       }
@@ -538,7 +553,7 @@ class LiveIntelController extends GetxController {
         ),
       );
     } else {
-      final latest = roomStatuses.firstWhereOrNull((item) => item.roomId == targetRoomId);
+      final latest = _findStatusByRoomId(targetRoomId);
       if (latest == null) {
         return;
       }
@@ -646,7 +661,7 @@ class LiveIntelController extends GetxController {
   }
 
   LiveIntelRoomStatus? get _currentRoom =>
-      roomStatuses.firstWhereOrNull((item) => item.roomId == roomId);
+      _findStatusByRoomId(roomId);
 
   void _upsertStatus(LiveIntelRoomStatus next) {
     final index = roomStatuses.indexWhere((item) => item.roomId == next.roomId);
