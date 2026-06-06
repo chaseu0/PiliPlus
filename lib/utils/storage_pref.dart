@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' show pow, sqrt;
 
@@ -53,6 +54,12 @@ abstract final class Pref {
   static final Box _setting = GStorage.setting;
   static final Box _video = GStorage.video;
   static final Box _localCache = GStorage.localCache;
+  static const Map<String, List<String>> _defaultLiveIntelKeywordGroups = {
+    '外链引流': ['vx', 'v信', '微信', 'qq', '扣扣', 'tg', '飞机', '群', '链接'],
+    '私信导流': ['私信', '主页', '备注', '进群', '加我', '联系我'],
+    '刷礼诱导': ['礼物', '舰长', '上舰', '大航海', '打赏', '榜一', '守护'],
+    '深夜节目': ['深夜', '福利视频', '节目', '福利', '舞蹈', '跳舞', '私播'],
+  };
 
   static UserInfoData? get userInfoCache =>
       GStorage.userInfo.get('userInfoCache');
@@ -66,6 +73,46 @@ abstract final class Pref {
 
   static Set<int> get blackMids =>
       _localCache.get(LocalCacheKey.blackMids, defaultValue: <int>{});
+
+  static Map<String, List<String>> get liveIntelKeywordGroups {
+    final raw = _setting.get(SettingBoxKey.liveIntelKeywordGroups);
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        final result = <String, List<String>>{};
+        decoded.forEach((key, value) {
+          result[key] = List<String>.from(value as List);
+        });
+        if (result.isNotEmpty) {
+          return result;
+        }
+      } catch (_) {}
+    }
+    return _defaultLiveIntelKeywordGroups.map(
+      (key, value) => MapEntry(key, List<String>.from(value)),
+    );
+  }
+
+  static set liveIntelKeywordGroups(Map<String, List<String>> value) =>
+      _setting.put(SettingBoxKey.liveIntelKeywordGroups, jsonEncode(value));
+
+  static int get liveIntelAreaPageLimit =>
+      _setting.get(SettingBoxKey.liveIntelAreaPageLimit, defaultValue: 5);
+
+  static set liveIntelAreaPageLimit(int value) =>
+      _setting.put(SettingBoxKey.liveIntelAreaPageLimit, value);
+
+  static int get liveIntelAreaRoomLimit =>
+      _setting.get(SettingBoxKey.liveIntelAreaRoomLimit, defaultValue: 40);
+
+  static set liveIntelAreaRoomLimit(int value) =>
+      _setting.put(SettingBoxKey.liveIntelAreaRoomLimit, value);
+
+  static int get liveIntelAreaPageSize =>
+      _setting.get(SettingBoxKey.liveIntelAreaPageSize, defaultValue: 50);
+
+  static set liveIntelAreaPageSize(int value) =>
+      _setting.put(SettingBoxKey.liveIntelAreaPageSize, value);
 
   static set blackMids(Set<int> blackMidsSet) =>
       _localCache.put(LocalCacheKey.blackMids, blackMidsSet);

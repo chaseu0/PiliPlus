@@ -23,6 +23,8 @@ import 'package:PiliPlus/pages/danmaku/danmaku_model.dart';
 import 'package:PiliPlus/pages/live_room/contribution_rank/controller.dart';
 import 'package:PiliPlus/pages/live_room/contribution_rank/view.dart';
 import 'package:PiliPlus/pages/live_room/controller.dart';
+import 'package:PiliPlus/pages/live_room/intel/controller.dart';
+import 'package:PiliPlus/pages/live_room/intel/view.dart';
 import 'package:PiliPlus/pages/live_room/superchat/superchat_card.dart';
 import 'package:PiliPlus/pages/live_room/superchat/superchat_panel.dart';
 import 'package:PiliPlus/pages/live_room/widgets/bottom_control.dart';
@@ -34,6 +36,7 @@ import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
 import 'package:PiliPlus/plugin/pl_player/view/view.dart';
+import 'package:PiliPlus/services/live_intel_bus.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/extension/num_ext.dart';
@@ -185,6 +188,10 @@ class _LiveRoomPageState extends State<LiveRoomPage>
         tag: '${_liveRoomController.roomId}${e.name}',
       );
     }
+    if (Get.isRegistered<LiveIntelController>(tag: heroTag)) {
+      Get.delete<LiveIntelController>(tag: heroTag);
+    }
+    LiveIntelBusService.instance.disposeTag(heroTag);
     super.dispose();
   }
 
@@ -540,6 +547,41 @@ class _LiveRoomPageState extends State<LiveRoomPage>
     }
   }
 
+  void _showIntelPanel() {
+    if (!Get.isRegistered<LiveIntelController>(tag: heroTag)) {
+      final roomInfo = _liveRoomController.roomInfoH5.value;
+      Get.put(
+        LiveIntelController(
+          heroTag: heroTag,
+          roomId: _liveRoomController.roomId,
+          initialRoomTitle:
+              roomInfo?.roomInfo?.title ?? _liveRoomController.title.value,
+          initialRoomOwner: roomInfo?.anchorInfo?.baseInfo?.uname ?? '',
+          seedMessages: _liveRoomController.messages
+              .whereType<DanmakuMsg>()
+              .toList(),
+          initialTrueOnline: _liveRoomController.onlineCount.value == null
+              ? null
+              : NumUtils.parseNum(_liveRoomController.onlineCount.value!),
+        ),
+        tag: heroTag,
+      );
+    }
+    final heightFactor = PlatformUtils.isMobile && !isPortrait ? 1.0 : 0.9;
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: true,
+      clipBehavior: .hardEdge,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 520),
+      builder: (context) => FractionallySizedBox(
+        widthFactor: 1.0,
+        heightFactor: heightFactor,
+        child: LiveIntelPanel(heroTag: heroTag),
+      ),
+    );
+  }
+
   PreferredSizeWidget _buildAppBar(bool isFullScreen) {
     final color = Theme.of(context).colorScheme.onSurfaceVariant;
     return AppBar(
@@ -664,6 +706,21 @@ class _LiveRoomPageState extends State<LiveRoomPage>
                       color: color,
                     ),
                     const Text('浏览器打开'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                onTap: _showIntelPanel,
+                child: Row(
+                  spacing: 10,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.insights,
+                      size: 19,
+                      color: color,
+                    ),
+                    const Text('直播情报面板'),
                   ],
                 ),
               ),

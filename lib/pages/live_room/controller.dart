@@ -24,6 +24,7 @@ import 'package:PiliPlus/pages/video/widgets/header_control.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
+import 'package:PiliPlus/services/live_intel_bus.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/tcp/live.dart';
 import 'package:PiliPlus/utils/accounts.dart';
@@ -475,20 +476,21 @@ class LiveRoomController extends GetxController {
               name: extra['reply_uname'],
             );
           }
-          addDm(
-            DanmakuMsg(
-              name: name,
-              text: msg,
-              emots: (extra['emots'] as Map<String, dynamic>?)?.map(
-                (k, v) => MapEntry(k, BaseEmote.fromJson(v)),
-              ),
-              uemote: uemote,
-              extra: liveExtra,
-              reply: reply,
-              medalInfo: !GlobalData().showMedal || user['medal'] == null
-                  ? null
-                  : UinfoMedal.fromJson(user['medal']),
+          final danmakuMsg = DanmakuMsg(
+            name: name,
+            text: msg,
+            emots: (extra['emots'] as Map<String, dynamic>?)?.map(
+              (k, v) => MapEntry(k, BaseEmote.fromJson(v)),
             ),
+            uemote: uemote,
+            extra: liveExtra,
+            reply: reply,
+            medalInfo: !GlobalData().showMedal || user['medal'] == null
+                ? null
+                : UinfoMedal.fromJson(user['medal']),
+          );
+          addDm(
+            danmakuMsg,
             DanmakuContentItem(
               msg,
               color: DanmakuOptions.blockColorful
@@ -500,6 +502,7 @@ class LiveRoomController extends GetxController {
               extra: liveExtra,
             ),
           );
+          LiveIntelBusService.instance.emitDanmaku(heroTag, danmakuMsg);
           break;
         case 'SUPER_CHAT_MESSAGE' when showSuperChat:
           final item = SuperChatItem.fromJson(obj['data']);
@@ -540,7 +543,12 @@ class LiveRoomController extends GetxController {
           watchedShow.value = obj['data']['text_large'];
           break;
         case 'ONLINE_RANK_COUNT':
-          onlineCount.value = NumUtils.numFormat(obj['data']['count']);
+          final count = obj['data']['count'];
+          onlineCount.value = NumUtils.numFormat(count);
+          final countInt = count is num ? count.toInt() : int.tryParse('$count');
+          if (countInt != null) {
+            LiveIntelBusService.instance.emitOnline(heroTag, countInt);
+          }
           break;
         case 'ROOM_CHANGE':
           title.value = obj['data']['title'];

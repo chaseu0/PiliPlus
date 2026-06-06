@@ -321,6 +321,12 @@ abstract final class Api {
   static const String liveRoomInfoH5 =
       '${HttpString.liveBaseUrl}/xlive/web-room/v1/index/getH5InfoByRoom';
 
+  static const String liveRoomBaseInfo =
+      '${HttpString.liveBaseUrl}/room/v1/Room/get_info';
+
+  static const String liveRoomStatusByUids =
+      '${HttpString.liveBaseUrl}/room/v1/Room/get_status_info_by_uids';
+
   // 直播间弹幕预获取
   // roomid roomId
   static const String liveRoomDmPrefetch =
@@ -982,6 +988,12 @@ abstract final class Api {
   static const String liveContributionRank =
       '${HttpString.liveBaseUrl}/xlive/general-interface/v1/rank/queryContributionRank';
 
+  static const String liveOnlineGoldRank =
+      '${HttpString.liveBaseUrl}/xlive/general-interface/v1/rank/getOnlineGoldRank';
+
+  static const String liveGuardTopList =
+      '${HttpString.liveBaseUrl}/xlive/app-room/v2/guardTab/topListNew';
+
   static const String superChatReport =
       '${HttpString.liveBaseUrl}/av/v1/SuperChat/report';
 
@@ -1004,6 +1016,9 @@ abstract final class Api {
 
   static const String memberGuard =
       '${HttpString.liveBaseUrl}/xlive/app-ucenter/v1/guard/MainGuardCardAll';
+
+  static const String liveMasterInfo =
+      '${HttpString.liveBaseUrl}/live_user/v1/Master/info';
 
   static const String bubble = '/x/tribee/v1/dyn/all';
 

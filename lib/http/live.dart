@@ -34,6 +34,28 @@ import 'package:dio/dio.dart';
 abstract final class LiveHttp {
   static Account get recommend => Accounts.get(AccountType.recommend);
 
+  static Options _mergeOptions(Options? base, Options extra) {
+    if (base == null) {
+      return extra;
+    }
+    return base.copyWith(
+      headers: {
+        ...?extra.headers,
+        ...?base.headers,
+      },
+      extra: {
+        ...?extra.extra,
+        ...?base.extra,
+      },
+      contentType: base.contentType ?? extra.contentType,
+      responseType: base.responseType ?? extra.responseType,
+      sendTimeout: base.sendTimeout ?? extra.sendTimeout,
+      receiveTimeout: base.receiveTimeout ?? extra.receiveTimeout,
+      followRedirects: base.followRedirects ?? extra.followRedirects,
+      validateStatus: base.validateStatus ?? extra.validateStatus,
+    );
+  }
+
   static Future<LoadingState<void>> sendLiveMsg({
     required Object roomId,
     required Object msg,
@@ -124,17 +146,69 @@ abstract final class LiveHttp {
     }
   }
 
+  static Future<LoadingState<Map<String, dynamic>>> liveRoomBaseInfo({
+    required Object roomId,
+    Options? options,
+  }) async {
+    final res = await Request().get(
+      Api.liveRoomBaseInfo,
+      queryParameters: {
+        'room_id': roomId,
+        'from': 'room',
+      },
+      options: options,
+    );
+    if (res.data['code'] == 0) {
+      return Success(Map<String, dynamic>.from(res.data['data'] ?? const {}));
+    } else {
+      return Error(res.data['message']);
+    }
+  }
+
+  static Future<LoadingState<Map<String, Map<String, dynamic>>>>
+  liveRoomStatusByUids({
+    required List<int> uids,
+    Options? options,
+  }) async {
+    final res = await Request().post(
+      Api.liveRoomStatusByUids,
+      data: {'uids': uids},
+      options: _mergeOptions(
+        options,
+        Options(contentType: Headers.jsonContentType),
+      ),
+    );
+    if (res.data['code'] == 0) {
+      final raw = Map<String, dynamic>.from(res.data['data'] ?? const {});
+      final result = <String, Map<String, dynamic>>{};
+      raw.forEach((key, value) {
+        if (value is Map<String, dynamic>) {
+          result[key] = value;
+        } else if (value is Map) {
+          result[key] = Map<String, dynamic>.from(value);
+        }
+      });
+      return Success(result);
+    } else {
+      return Error(res.data['message']);
+    }
+  }
+
   static Future<LoadingState<List<DanmakuMsg>?>> liveRoomDmPrefetch({
     required Object roomId,
+    Options? options,
   }) async {
     final res = await Request().get(
       Api.liveRoomDmPrefetch,
       queryParameters: {'roomid': roomId},
-      options: Options(
-        headers: {
-          'referer': 'https://live.bilibili.com/$roomId',
-          'user-agent': BrowserUa.pc,
-        },
+      options: _mergeOptions(
+        options,
+        Options(
+          headers: {
+            'referer': 'https://live.bilibili.com/$roomId',
+            'user-agent': BrowserUa.pc,
+          },
+        ),
       ),
     );
     if (res.data['code'] == 0) {
@@ -147,6 +221,30 @@ abstract final class LiveHttp {
       } catch (e) {
         return Error(e.toString());
       }
+    } else {
+      return Error(res.data['message']);
+    }
+  }
+
+  static Future<LoadingState<Map<String, dynamic>>> liveRoomDmPrefetchRaw({
+    required Object roomId,
+    Options? options,
+  }) async {
+    final res = await Request().get(
+      Api.liveRoomDmPrefetch,
+      queryParameters: {'roomid': roomId},
+      options: _mergeOptions(
+        options,
+        Options(
+          headers: {
+            'referer': 'https://live.bilibili.com/$roomId',
+            'user-agent': BrowserUa.pc,
+          },
+        ),
+      ),
+    );
+    if (res.data['code'] == 0) {
+      return Success(Map<String, dynamic>.from(res.data['data'] ?? const {}));
     } else {
       return Error(res.data['message']);
     }
@@ -264,6 +362,8 @@ abstract final class LiveHttp {
     required Object? areaId,
     required Object? parentAreaId,
     String? sortType,
+    int pageSize = 20,
+    Options? options,
   }) async {
     final params = {
       'access_key': ?recommend.accessKey,
@@ -284,7 +384,7 @@ abstract final class LiveHttp {
       'module_select': 0,
       'network': 'wifi',
       'page': pn,
-      'page_size': 20,
+      'page_size': pageSize,
       'platform': 'android',
       'qn': 0,
       'sort_type': ?sortType,
@@ -297,22 +397,25 @@ abstract final class LiveHttp {
     final res = await Request().get(
       Api.liveSecondList,
       queryParameters: params,
-      options: Options(
-        headers: {
-          'buvid': LoginHttp.buvid,
-          'fp_local':
-              '1111111111111111111111111111111111111111111111111111111111111111',
-          'fp_remote':
-              '1111111111111111111111111111111111111111111111111111111111111111',
-          'session_id': '11111111',
-          'env': 'prod',
-          'app-key': 'android',
-          'User-Agent': Constants.userAgentApp,
-          'x-bili-trace-id': Constants.traceId,
-          'x-bili-aurora-eid': '',
-          'x-bili-aurora-zone': '',
-          'bili-http-engine': 'cronet',
-        },
+      options: _mergeOptions(
+        options,
+        Options(
+          headers: {
+            'buvid': LoginHttp.buvid,
+            'fp_local':
+                '1111111111111111111111111111111111111111111111111111111111111111',
+            'fp_remote':
+                '1111111111111111111111111111111111111111111111111111111111111111',
+            'session_id': '11111111',
+            'env': 'prod',
+            'app-key': 'android',
+            'User-Agent': Constants.userAgentApp,
+            'x-bili-trace-id': Constants.traceId,
+            'x-bili-aurora-eid': '',
+            'x-bili-aurora-zone': '',
+            'bili-http-engine': 'cronet',
+          },
+        ),
       ),
     );
     if (res.data['code'] == 0) {
@@ -703,6 +806,74 @@ abstract final class LiveHttp {
       } catch (e, s) {
         return Error('$e\n\n$s');
       }
+    } else {
+      return Error(res.data['message']);
+    }
+  }
+
+  static Future<LoadingState<Map<String, dynamic>>> liveOnlineGoldRank({
+    required Object roomId,
+    required Object ruid,
+    int page = 1,
+    int pageSize = 20,
+    Options? options,
+  }) async {
+    final res = await Request().get(
+      Api.liveOnlineGoldRank,
+      queryParameters: {
+        'roomId': roomId,
+        'ruid': ruid,
+        'page': page,
+        'pageSize': pageSize,
+      },
+      options: options,
+    );
+    if (res.data['code'] == 0) {
+      return Success(Map<String, dynamic>.from(res.data['data'] ?? const {}));
+    } else {
+      return Error(res.data['message']);
+    }
+  }
+
+  static Future<LoadingState<Map<String, dynamic>>> liveGuardTopList({
+    required Object roomId,
+    required Object ruid,
+    int page = 1,
+    int pageSize = 20,
+    int type = 5,
+    Options? options,
+  }) async {
+    final res = await Request().get(
+      Api.liveGuardTopList,
+      queryParameters: {
+        'roomid': roomId,
+        'ruid': ruid,
+        'page': page,
+        'page_size': pageSize,
+        'typ': type,
+      },
+      options: options,
+    );
+    if (res.data['code'] == 0) {
+      return Success(Map<String, dynamic>.from(res.data['data'] ?? const {}));
+    } else {
+      return Error(res.data['message']);
+    }
+  }
+
+  static Future<LoadingState<Map<String, dynamic>>> liveMasterInfo({
+    required Object uid,
+    Options? options,
+  }) async {
+    final res = await Request().get(
+      Api.liveMasterInfo,
+      queryParameters: {
+        'uid': uid,
+      },
+      options: options,
+    );
+    if (res.data['code'] == 0) {
+      return Success(Map<String, dynamic>.from(res.data['data'] ?? const {}));
     } else {
       return Error(res.data['message']);
     }

@@ -6,6 +6,7 @@ import 'package:PiliPlus/http/api.dart';
 import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/http/retry_interceptor.dart';
+import 'package:PiliPlus/services/request_debug.dart';
 import 'package:PiliPlus/http/user.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/accounts/account.dart';
@@ -260,14 +261,34 @@ class Request {
     Options? options,
     CancelToken? cancelToken,
   }) async {
+    final traceLabel = options?.extra?['debugLabel'] as String?;
+    final traceCategory =
+        (options?.extra?['debugCategory'] as String?) ?? 'general';
     try {
-      return await dio.get<T>(
+      final response = await dio.get<T>(
         url,
         queryParameters: queryParameters,
         options: options,
         cancelToken: cancelToken,
       );
+      if (traceLabel != null) {
+        RequestDebugService.instance.recordFromResponse(
+          response,
+          label: traceLabel,
+          category: traceCategory,
+        );
+      }
+      return response;
     } on DioException catch (e) {
+      if (traceLabel != null) {
+        RequestDebugService.instance.recordError(
+          requestOptions: e.requestOptions,
+          response: e.response,
+          error: e.error ?? e.message,
+          label: traceLabel,
+          category: traceCategory,
+        );
+      }
       return Response(
         data: {
           'message': await AccountManager.dioError(e),
@@ -289,16 +310,36 @@ class Request {
     CancelToken? cancelToken,
   }) async {
     // if (kDebugMode) debugPrint('post-data: $data');
+    final traceLabel = options?.extra?['debugLabel'] as String?;
+    final traceCategory =
+        (options?.extra?['debugCategory'] as String?) ?? 'general';
     try {
-      return await dio.post<T>(
+      final response = await dio.post<T>(
         url,
         data: data,
         queryParameters: queryParameters,
         options: options,
         cancelToken: cancelToken,
       );
+      if (traceLabel != null) {
+        RequestDebugService.instance.recordFromResponse(
+          response,
+          label: traceLabel,
+          category: traceCategory,
+        );
+      }
+      return response;
     } on DioException catch (e) {
       AccountManager.toast(e);
+      if (traceLabel != null) {
+        RequestDebugService.instance.recordError(
+          requestOptions: e.requestOptions,
+          response: e.response,
+          error: e.error ?? e.message,
+          label: traceLabel,
+          category: traceCategory,
+        );
+      }
       return Response(
         data: {
           'message': await AccountManager.dioError(e),
