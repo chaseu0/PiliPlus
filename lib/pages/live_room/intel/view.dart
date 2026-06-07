@@ -609,107 +609,114 @@ class _CoverageRoomCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final image = item.keyframe ?? item.cover;
     final missing = _missingCoverageLabels(item);
-    return InkWell(
-      borderRadius: Style.mdRadius,
-      onTap: () => PageUtils.toLiveRoom(item.roomId),
-      child: Ink(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final previewWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        return InkWell(
           borderRadius: Style.mdRadius,
-          color: Theme.of(context).colorScheme.surfaceContainerLow,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: const BorderRadius.all(Style.imgRadius),
-              child: NetworkImgLayer(
-                src: image,
-                width: double.infinity,
-                height: 132,
-              ),
+          onTap: () => PageUtils.toLiveRoom(item.roomId),
+          child: Ink(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              borderRadius: Style.mdRadius,
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
             ),
-            const SizedBox(height: 10),
-            Row(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    item.title.isEmpty ? '房间 ${item.roomId}' : item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                ClipRRect(
+                  borderRadius: const BorderRadius.all(Style.imgRadius),
+                  child: NetworkImgLayer(
+                    src: image,
+                    width: previewWidth - 20,
+                    height: 132,
                   ),
                 ),
-                const SizedBox(width: 8),
-                _StateBadge(
-                  text: item.historyState.label,
-                  active: item.isFullyCovered,
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title.isEmpty ? '房间 ${item.roomId}' : item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _StateBadge(
+                      text: item.historyState.label,
+                      active: item.isFullyCovered,
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 6),
+                Text(
+                  '${item.uname.isEmpty ? '未知UP' : item.uname} · ${item.roomId}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '覆盖 ${item.coverageReadyCount}/${item.coverageTargetCount} · ${_formatPercent(item.coverageRatio)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: item.coverageRatio,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _CoverageFlag(label: '封面', ready: item.hasCoverAsset),
+                    _CoverageFlag(label: '在线', ready: item.hasDisplayOnline),
+                    _CoverageFlag(label: '高能', ready: item.hasTrueOnline),
+                    _CoverageFlag(label: '粉丝', ready: item.hasFollower),
+                    _CoverageFlag(label: '大航海', ready: item.hasGuard),
+                    _CoverageFlag(label: '历史评', ready: item.hasHistoryComments),
+                    _CoverageFlag(
+                      label: '命中评',
+                      ready: item.hasMatchedComments,
+                      warnWhenMissing: false,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '历史 ${NumUtils.numFormat(item.historyCommentCount)} · 实时 ${NumUtils.numFormat(item.realtimeCommentCount)} · 命中 ${NumUtils.numFormat(item.matchedCommentCount)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  missing.isEmpty ? '当前房间覆盖完整' : '缺口：${missing.join(' / ')}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (item.lastError?.isNotEmpty == true) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    item.lastError!,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              '${item.uname.isEmpty ? '未知UP' : item.uname} · ${item.roomId}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '覆盖 ${item.coverageReadyCount}/${item.coverageTargetCount} · ${_formatPercent(item.coverageRatio)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                minHeight: 6,
-                value: item.coverageRatio,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                _CoverageFlag(label: '封面', ready: item.hasCoverAsset),
-                _CoverageFlag(label: '在线', ready: item.hasDisplayOnline),
-                _CoverageFlag(label: '高能', ready: item.hasTrueOnline),
-                _CoverageFlag(label: '粉丝', ready: item.hasFollower),
-                _CoverageFlag(label: '大航海', ready: item.hasGuard),
-                _CoverageFlag(label: '历史评', ready: item.hasHistoryComments),
-                _CoverageFlag(
-                  label: '命中评',
-                  ready: item.hasMatchedComments,
-                  warnWhenMissing: false,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              '历史 ${NumUtils.numFormat(item.historyCommentCount)} · 实时 ${NumUtils.numFormat(item.realtimeCommentCount)} · 命中 ${NumUtils.numFormat(item.matchedCommentCount)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              missing.isEmpty ? '当前房间覆盖完整' : '缺口：${missing.join(' / ')}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            if (item.lastError?.isNotEmpty == true) ...[
-              const SizedBox(height: 8),
-              Text(
-                item.lastError!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
