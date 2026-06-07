@@ -52,25 +52,50 @@ class LiveIntelController extends GetxController {
   int get roomLimit => Pref.liveIntelAreaRoomLimit;
   int get pageSize => Pref.liveIntelAreaPageSize;
 
-  List<RequestDebugRecord> get debugRecords =>
-      RequestDebugService.instance.records
-          .where((item) => item.category == 'live_intel' || item.category == 'ws')
-          .toList();
+  List<RequestDebugRecord> get debugRecords => RequestDebugService
+      .instance
+      .records
+      .where((item) => item.category == 'live_intel' || item.category == 'ws')
+      .toList();
 
-  List<LiveIntelRoomStatus> get followerRanking => _rankBy(
-    roomStatuses,
-    selector: (item) => item.followerCount,
-  );
+  List<LiveIntelRoomStatus> get followerRanking =>
+      _rankBy(roomStatuses, selector: (item) => item.followerCount);
 
-  List<LiveIntelRoomStatus> get guardRanking => _rankBy(
-    roomStatuses,
-    selector: (item) => item.guardCount,
-  );
+  List<LiveIntelRoomStatus> get guardRanking =>
+      _rankBy(roomStatuses, selector: (item) => item.guardCount);
 
-  List<LiveIntelRoomStatus> get trueOnlineRanking => _rankBy(
-    roomStatuses,
-    selector: (item) => item.trueOnline,
-  );
+  List<LiveIntelRoomStatus> get trueOnlineRanking =>
+      _rankBy(roomStatuses, selector: (item) => item.trueOnline);
+
+  List<LiveIntelRoomStatus> get coverageRooms {
+    final list = List<LiveIntelRoomStatus>.from(roomStatuses);
+    list.sort((a, b) {
+      if (a.isCurrentRoom != b.isCurrentRoom) {
+        return a.isCurrentRoom ? -1 : 1;
+      }
+      final failureRank = _coverageStateRank(
+        a,
+      ).compareTo(_coverageStateRank(b));
+      if (failureRank != 0) {
+        return failureRank;
+      }
+      final gapRank = a.coverageReadyCount.compareTo(b.coverageReadyCount);
+      if (gapRank != 0) {
+        return gapRank;
+      }
+      return (b.trueOnline ?? -1).compareTo(a.trueOnline ?? -1);
+    });
+    return list;
+  }
+
+  int get coverageTargetSlots =>
+      roomStatuses.fold<int>(0, (sum, item) => sum + item.coverageTargetCount);
+
+  int get coverageReadySlots =>
+      roomStatuses.fold<int>(0, (sum, item) => sum + item.coverageReadyCount);
+
+  double get overallCoverageRatio =>
+      coverageTargetSlots == 0 ? 0 : coverageReadySlots / coverageTargetSlots;
 
   LiveIntelRoomStatus? _findStatusByRoomId(int targetRoomId) {
     for (final item in roomStatuses) {
@@ -143,10 +168,7 @@ class LiveIntelController extends GetxController {
     }
   }
 
-  void ingestRealtimeDanmaku(
-    DanmakuMsg msg, {
-    bool fromSeed = false,
-  }) {
+  void ingestRealtimeDanmaku(DanmakuMsg msg, {bool fromSeed = false}) {
     final matchedKeywords = _matchKeywords(msg.text);
     final key = _commentKey(roomId, msg.extra.id);
     final currentTitle = _currentRoom?.title ?? initialRoomTitle;
@@ -176,7 +198,8 @@ class LiveIntelController extends GetxController {
         current.copyWith(
           realtimeCommentCount: current.realtimeCommentCount + 1,
           matchedCommentCount:
-              current.matchedCommentCount + (matchedKeywords.isNotEmpty ? 1 : 0),
+              current.matchedCommentCount +
+              (matchedKeywords.isNotEmpty ? 1 : 0),
         ),
       );
       if (!fromSeed) {
@@ -242,29 +265,32 @@ class LiveIntelController extends GetxController {
       options: _debugOptions('当前房间基础信息'),
     );
     if (res case Success(:final response)) {
-      _parentAreaId = _safeInt(response['parent_area_id'] ?? response['area_v2_parent_id']);
+      _parentAreaId = _safeInt(
+        response['parent_area_id'] ?? response['area_v2_parent_id'],
+      );
       _areaId = _safeInt(response['area_id'] ?? response['area_v2_id']);
       _areaName = response['area_name']?.toString() ?? _areaName;
-      final current = (_currentRoom ??
-              LiveIntelRoomStatus(
-                roomId: roomId,
-                uid: _safeInt(response['uid']) ?? 0,
-                title: initialRoomTitle,
-                uname: initialRoomOwner,
+      final current =
+          (_currentRoom ??
+                  LiveIntelRoomStatus(
+                    roomId: roomId,
+                    uid: _safeInt(response['uid']) ?? 0,
+                    title: initialRoomTitle,
+                    uname: initialRoomOwner,
+                    areaName: _areaName,
+                    historyState: LiveIntelFetchState.idle,
+                    isCurrentRoom: true,
+                  ))
+              .copyWith(
+                uid: _safeInt(response['uid']) ?? _currentRoom?.uid ?? 0,
+                title: response['title']?.toString() ?? initialRoomTitle,
+                uname: response['uname']?.toString() ?? initialRoomOwner,
                 areaName: _areaName,
-                historyState: LiveIntelFetchState.idle,
+                displayOnline: _safeInt(response['online']),
+                cover: response['user_cover']?.toString(),
+                keyframe: response['keyframe']?.toString(),
                 isCurrentRoom: true,
-              ))
-          .copyWith(
-            uid: _safeInt(response['uid']) ?? _currentRoom?.uid ?? 0,
-            title: response['title']?.toString() ?? initialRoomTitle,
-            uname: response['uname']?.toString() ?? initialRoomOwner,
-            areaName: _areaName,
-            displayOnline: _safeInt(response['online']),
-            cover: response['user_cover']?.toString(),
-            keyframe: response['keyframe']?.toString(),
-            isCurrentRoom: true,
-          );
+              );
       _upsertStatus(current);
       if (current.uid > 0) {
         await _applyBatchStatus([current.uid]);
@@ -391,7 +417,9 @@ class LiveIntelController extends GetxController {
           _upsertStatus(
             status.copyWith(
               displayOnline: _safeInt(value['online']),
-              cover: value['cover_from_user']?.toString() ?? value['cover']?.toString(),
+              cover:
+                  value['cover_from_user']?.toString() ??
+                  value['cover']?.toString(),
               keyframe: value['keyframe']?.toString(),
             ),
           );
@@ -459,9 +487,7 @@ class LiveIntelController extends GetxController {
         return;
       }
       _upsertStatus(
-        latest.copyWith(
-          followerCount: _safeInt(response['follower_num']),
-        ),
+        latest.copyWith(followerCount: _safeInt(response['follower_num'])),
       );
     }
   }
@@ -535,7 +561,9 @@ class LiveIntelController extends GetxController {
               text: msg.text,
               source: LiveIntelCommentSource.history,
               capturedAt: DateTime.fromMillisecondsSinceEpoch(
-                (_safeInt(msg.extra.ts) ?? DateTime.now().millisecondsSinceEpoch ~/ 1000) * 1000,
+                (_safeInt(msg.extra.ts) ??
+                        DateTime.now().millisecondsSinceEpoch ~/ 1000) *
+                    1000,
               ),
               rawPayload: Utils.jsonEncoder.convert(json),
               matchedKeywords: matchedKeywords,
@@ -568,12 +596,12 @@ class LiveIntelController extends GetxController {
   }
 
   void _prepareForRefresh() {
-    comments.removeWhere((item) => item.source == LiveIntelCommentSource.history);
+    comments.removeWhere(
+      (item) => item.source == LiveIntelCommentSource.history,
+    );
     _seenCommentKeys
       ..clear()
-      ..addAll(
-        comments.map((item) => item.id),
-      );
+      ..addAll(comments.map((item) => item.id));
     roomStatuses.assignAll(
       roomStatuses.map(
         (item) => item.copyWith(
@@ -581,13 +609,13 @@ class LiveIntelController extends GetxController {
           historyCommentCount: 0,
           matchedCommentCount: item.realtimeCommentCount > 0
               ? comments
-                  .where(
-                    (comment) =>
-                        comment.roomId == item.roomId &&
-                        comment.source == LiveIntelCommentSource.realtime &&
-                        comment.matchedKeywords.isNotEmpty,
-                  )
-                  .length
+                    .where(
+                      (comment) =>
+                          comment.roomId == item.roomId &&
+                          comment.source == LiveIntelCommentSource.realtime &&
+                          comment.matchedKeywords.isNotEmpty,
+                    )
+                    .length
               : 0,
           lastError: null,
           clearError: true,
@@ -597,6 +625,7 @@ class LiveIntelController extends GetxController {
   }
 
   void _rebuildSummary() {
+    final items = roomStatuses;
     summary.value = LiveIntelAreaSummary(
       parentAreaId: _parentAreaId ?? 0,
       areaId: _areaId ?? 0,
@@ -607,21 +636,42 @@ class LiveIntelController extends GetxController {
       totalRoomCount: _totalRoomCount,
       discoveredRoomCount: _discoveredRoomCount,
       discoveredUpCount: _discoveredUpCount,
-      monitoredRoomCount: roomStatuses.length,
-      historySuccessCount: roomStatuses
+      monitoredRoomCount: items.length,
+      historySuccessCount: items
           .where((item) => item.historyState == LiveIntelFetchState.success)
           .length,
-      historyFailedCount: roomStatuses
+      historyFailedCount: items
           .where((item) => item.historyState == LiveIntelFetchState.failed)
           .length,
-      totalCommentCount: roomStatuses.fold<int>(
+      totalCommentCount: items.fold<int>(
         0,
         (sum, item) => sum + item.totalCommentCount,
       ),
-      totalMatchedCount: roomStatuses.fold<int>(
+      totalMatchedCount: items.fold<int>(
         0,
         (sum, item) => sum + item.matchedCommentCount,
       ),
+      loadingCount: items
+          .where((item) => item.historyState == LiveIntelFetchState.loading)
+          .length,
+      idleCount: items
+          .where((item) => item.historyState == LiveIntelFetchState.idle)
+          .length,
+      partialCoverageCount: items
+          .where((item) => item.coverageReadyCount > 0 && item.hasCoverageGap)
+          .length,
+      fullCoverageCount: items.where((item) => item.isFullyCovered).length,
+      coverAssetCount: items.where((item) => item.hasCoverAsset).length,
+      displayOnlineCount: items.where((item) => item.hasDisplayOnline).length,
+      trueOnlineCount: items.where((item) => item.hasTrueOnline).length,
+      followerCount: items.where((item) => item.hasFollower).length,
+      guardCount: items.where((item) => item.hasGuard).length,
+      historyCommentCoverageCount: items
+          .where((item) => item.hasHistoryComments)
+          .length,
+      matchedCommentCoverageCount: items
+          .where((item) => item.hasMatchedComments)
+          .length,
     );
   }
 
@@ -645,23 +695,18 @@ class LiveIntelController extends GetxController {
     );
   }
 
-  void _updateCurrentRoom({
-    int? trueOnline,
-  }) {
+  void _updateCurrentRoom({int? trueOnline}) {
     final current = _currentRoom;
     if (current == null) {
       return;
     }
     _upsertStatus(
-      current.copyWith(
-        trueOnline: trueOnline ?? current.trueOnline,
-      ),
+      current.copyWith(trueOnline: trueOnline ?? current.trueOnline),
     );
     _rebuildSummary();
   }
 
-  LiveIntelRoomStatus? get _currentRoom =>
-      _findStatusByRoomId(roomId);
+  LiveIntelRoomStatus? get _currentRoom => _findStatusByRoomId(roomId);
 
   void _upsertStatus(LiveIntelRoomStatus next) {
     final index = roomStatuses.indexWhere((item) => item.roomId == next.roomId);
@@ -717,7 +762,9 @@ class LiveIntelController extends GetxController {
   List<List<int>> _chunk(List<int> values, int size) {
     final result = <List<int>>[];
     for (int i = 0; i < values.length; i += size) {
-      result.add(values.sublist(i, i + size > values.length ? values.length : i + size));
+      result.add(
+        values.sublist(i, i + size > values.length ? values.length : i + size),
+      );
     }
     return result;
   }
@@ -731,10 +778,21 @@ class LiveIntelController extends GetxController {
     return list;
   }
 
-  Options _debugOptions(String label) => Options(
-    extra: {
-      'debugLabel': label,
-      'debugCategory': 'live_intel',
-    },
-  );
+  int _coverageStateRank(LiveIntelRoomStatus item) {
+    switch (item.historyState) {
+      case LiveIntelFetchState.failed:
+        return 0;
+      case LiveIntelFetchState.loading:
+        return 1;
+      case LiveIntelFetchState.idle:
+        return 2;
+      case LiveIntelFetchState.success:
+        return item.isFullyCovered ? 4 : 3;
+      case LiveIntelFetchState.skipped:
+        return 5;
+    }
+  }
+
+  Options _debugOptions(String label) =>
+      Options(extra: {'debugLabel': label, 'debugCategory': 'live_intel'});
 }

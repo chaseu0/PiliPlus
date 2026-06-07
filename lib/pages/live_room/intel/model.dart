@@ -85,6 +85,27 @@ class LiveIntelRoomStatus {
   final String? lastError;
 
   int get totalCommentCount => realtimeCommentCount + historyCommentCount;
+  bool get hasCoverAsset =>
+      (keyframe != null && keyframe!.isNotEmpty) ||
+      (cover != null && cover!.isNotEmpty);
+  bool get hasDisplayOnline => displayOnline != null;
+  bool get hasTrueOnline => trueOnline != null;
+  bool get hasFollower => followerCount != null;
+  bool get hasGuard => guardCount != null;
+  bool get hasHistoryComments => historyState == LiveIntelFetchState.success;
+  bool get hasMatchedComments => matchedCommentCount > 0;
+  int get coverageReadyCount =>
+      (hasCoverAsset ? 1 : 0) +
+      (hasDisplayOnline ? 1 : 0) +
+      (hasTrueOnline ? 1 : 0) +
+      (hasFollower ? 1 : 0) +
+      (hasGuard ? 1 : 0) +
+      (hasHistoryComments ? 1 : 0);
+  int get coverageTargetCount => 6;
+  double get coverageRatio =>
+      coverageTargetCount == 0 ? 0 : coverageReadyCount / coverageTargetCount;
+  bool get isFullyCovered => coverageReadyCount >= coverageTargetCount;
+  bool get hasCoverageGap => !isFullyCovered;
 
   LiveIntelRoomStatus copyWith({
     int? uid,
@@ -143,6 +164,17 @@ class LiveIntelAreaSummary {
     required this.historyFailedCount,
     required this.totalCommentCount,
     required this.totalMatchedCount,
+    required this.loadingCount,
+    required this.idleCount,
+    required this.partialCoverageCount,
+    required this.fullCoverageCount,
+    required this.coverAssetCount,
+    required this.displayOnlineCount,
+    required this.trueOnlineCount,
+    required this.followerCount,
+    required this.guardCount,
+    required this.historyCommentCoverageCount,
+    required this.matchedCommentCoverageCount,
   });
 
   final int parentAreaId;
@@ -159,4 +191,15 @@ class LiveIntelAreaSummary {
   final int historyFailedCount;
   final int totalCommentCount;
   final int totalMatchedCount;
+  final int loadingCount;
+  final int idleCount;
+  final int partialCoverageCount;
+  final int fullCoverageCount;
+  final int coverAssetCount;
+  final int displayOnlineCount;
+  final int trueOnlineCount;
+  final int followerCount;
+  final int guardCount;
+  final int historyCommentCoverageCount;
+  final int matchedCommentCoverageCount;
 }
