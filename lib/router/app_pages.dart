@@ -28,6 +28,7 @@ import 'package:PiliPlus/pages/hot/view.dart';
 import 'package:PiliPlus/pages/later/view.dart';
 import 'package:PiliPlus/pages/later_search/view.dart';
 import 'package:PiliPlus/pages/live_dm_block/view.dart';
+import 'package:PiliPlus/pages/live_monitor/view.dart';
 import 'package:PiliPlus/pages/live_room/view.dart';
 import 'package:PiliPlus/pages/login/view.dart';
 import 'package:PiliPlus/pages/main/view.dart';
@@ -113,6 +114,7 @@ class Routes {
     GetPage(name: '/fan', page: () => const FansPage()),
     // 直播详情
     GetPage(name: '/liveRoom', page: () => const LiveRoomPage()),
+    GetPage(name: '/liveMonitor', page: () => const LiveMonitorPage()),
     // 用户中心
     GetPage(name: '/member', page: () => const MemberPage()),
     GetPage(name: '/memberSearch', page: () => const MemberSearchPage()),

@@ -25,6 +25,7 @@ import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
 import 'package:PiliPlus/services/live_intel_bus.dart';
+import 'package:PiliPlus/services/live_monitor_service.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/tcp/live.dart';
 import 'package:PiliPlus/utils/accounts.dart';
@@ -503,6 +504,17 @@ class LiveRoomController extends GetxController {
             ),
           );
           LiveIntelBusService.instance.emitDanmaku(heroTag, danmakuMsg);
+          final liveMonitor = LiveMonitorService.maybeInstance;
+          if (liveMonitor != null) {
+            final roomInfo = roomInfoH5.value;
+            liveMonitor.syncRealtimeDanmaku(
+              roomId: roomId,
+              message: danmakuMsg,
+              uid: roomInfo?.roomInfo?.uid ?? ruid,
+              title: roomInfo?.roomInfo?.title ?? title.value,
+              owner: roomInfo?.anchorInfo?.baseInfo?.uname,
+            );
+          }
           break;
         case 'SUPER_CHAT_MESSAGE' when showSuperChat:
           final item = SuperChatItem.fromJson(obj['data']);
@@ -548,6 +560,17 @@ class LiveRoomController extends GetxController {
           final countInt = count is num ? count.toInt() : int.tryParse('$count');
           if (countInt != null) {
             LiveIntelBusService.instance.emitOnline(heroTag, countInt);
+            final liveMonitor = LiveMonitorService.maybeInstance;
+            if (liveMonitor != null) {
+              final roomInfo = roomInfoH5.value;
+              liveMonitor.syncRealtimeOnline(
+                roomId: roomId,
+                count: countInt,
+                uid: roomInfo?.roomInfo?.uid ?? ruid,
+                title: roomInfo?.roomInfo?.title ?? title.value,
+                owner: roomInfo?.anchorInfo?.baseInfo?.uname,
+              );
+            }
           }
           break;
         case 'ROOM_CHANGE':

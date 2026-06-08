@@ -726,6 +726,21 @@ class _LiveRoomPageState extends State<LiveRoomPage>
                   ],
                 ),
               ),
+              PopupMenuItem(
+                onTap: () => Get.toNamed('/liveMonitor'),
+                child: Row(
+                  spacing: 10,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.dashboard_customize_outlined,
+                      size: 19,
+                      color: color,
+                    ),
+                    const Text('打开总直播面板'),
+                  ],
+                ),
+              ),
               if (_liveRoomController.roomInfoH5.value != null)
                 PopupMenuItem(
                   onTap: () {

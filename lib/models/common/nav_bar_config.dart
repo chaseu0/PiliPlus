@@ -1,6 +1,7 @@
 import 'package:PiliPlus/models/common/enum_with_label.dart';
 import 'package:PiliPlus/pages/dynamics/view.dart';
 import 'package:PiliPlus/pages/home/view.dart';
+import 'package:PiliPlus/pages/live_monitor/view.dart';
 import 'package:PiliPlus/pages/mine/view.dart';
 import 'package:flutter/material.dart';
 
@@ -22,6 +23,12 @@ enum NavigationBarType implements EnumWithLabel {
     Icon(Icons.person_outline, size: 24),
     Icon(Icons.person, size: 24),
     MinePage(),
+  ),
+  liveMonitor(
+    '直播面板',
+    Icon(Icons.rss_feed_outlined, size: 22),
+    Icon(Icons.rss_feed, size: 22),
+    LiveMonitorPage(),
   ),
   ;
 

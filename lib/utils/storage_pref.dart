@@ -114,6 +114,70 @@ abstract final class Pref {
   static set liveIntelAreaPageSize(int value) =>
       _setting.put(SettingBoxKey.liveIntelAreaPageSize, value);
 
+  static int get liveMonitorSelectedAreaId =>
+      _setting.get(SettingBoxKey.liveMonitorSelectedAreaId, defaultValue: 0);
+
+  static set liveMonitorSelectedAreaId(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorSelectedAreaId, value);
+
+  static int get liveMonitorSelectedParentAreaId => _setting.get(
+    SettingBoxKey.liveMonitorSelectedParentAreaId,
+    defaultValue: 0,
+  );
+
+  static set liveMonitorSelectedParentAreaId(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorSelectedParentAreaId, value);
+
+  static String get liveMonitorSelectedAreaName => _setting.get(
+    SettingBoxKey.liveMonitorSelectedAreaName,
+    defaultValue: '',
+  );
+
+  static set liveMonitorSelectedAreaName(String value) =>
+      _setting.put(SettingBoxKey.liveMonitorSelectedAreaName, value);
+
+  static int get liveMonitorAreaPageLimit =>
+      _setting.get(SettingBoxKey.liveMonitorAreaPageLimit, defaultValue: 8);
+
+  static set liveMonitorAreaPageLimit(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorAreaPageLimit, value);
+
+  static int get liveMonitorAreaRoomLimit =>
+      _setting.get(SettingBoxKey.liveMonitorAreaRoomLimit, defaultValue: 120);
+
+  static set liveMonitorAreaRoomLimit(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorAreaRoomLimit, value);
+
+  static int get liveMonitorAreaPageSize =>
+      _setting.get(SettingBoxKey.liveMonitorAreaPageSize, defaultValue: 50);
+
+  static set liveMonitorAreaPageSize(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorAreaPageSize, value);
+
+  static int get liveMonitorAreaRefreshSeconds => _setting.get(
+    SettingBoxKey.liveMonitorAreaRefreshSeconds,
+    defaultValue: 90,
+  );
+
+  static set liveMonitorAreaRefreshSeconds(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorAreaRefreshSeconds, value);
+
+  static int get liveMonitorRoomRefreshSeconds => _setting.get(
+    SettingBoxKey.liveMonitorRoomRefreshSeconds,
+    defaultValue: 30,
+  );
+
+  static set liveMonitorRoomRefreshSeconds(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorRoomRefreshSeconds, value);
+
+  static bool get liveMonitorShowFirstFrame => _setting.get(
+    SettingBoxKey.liveMonitorShowFirstFrame,
+    defaultValue: true,
+  );
+
+  static set liveMonitorShowFirstFrame(bool value) =>
+      _setting.put(SettingBoxKey.liveMonitorShowFirstFrame, value);
+
   static set blackMids(Set<int> blackMidsSet) =>
       _localCache.put(LocalCacheKey.blackMids, blackMidsSet);
 

@@ -425,7 +425,9 @@ abstract final class LiveHttp {
     }
   }
 
-  static Future<LoadingState<List<AreaList>?>> liveAreaList() async {
+  static Future<LoadingState<List<AreaList>?>> liveAreaList({
+    Options? options,
+  }) async {
     final params = {
       'access_key': ?recommend.accessKey,
       'actionKey': 'appkey',
@@ -444,6 +446,7 @@ abstract final class LiveHttp {
     final res = await Request().get(
       Api.liveAreaList,
       queryParameters: params,
+      options: options,
     );
     if (res.data['code'] == 0) {
       return Success(
