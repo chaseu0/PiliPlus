@@ -650,15 +650,21 @@ class LiveMonitorApiServer extends GetxService {
         const selected = state.selectedArea &&
           area.parent_area_id === state.selectedArea.parent_area_id &&
           area.area_id === state.selectedArea.area_id;
-        return `<option value="${area.parent_area_id}:${area.area_id}" ${selected ? 'selected' : ''}>${esc(area.label)} · 在线 ${fmt(area.reported_total_room_count)} · 已监控 ${fmt(area.monitored_room_count)}</option>`;
+        const totalText = area.reported_total_room_count_is_reliable
+          ? fmt(area.reported_total_room_count)
+          : '未知';
+        return `<option value="${area.parent_area_id}:${area.area_id}" ${selected ? 'selected' : ''}>${esc(area.label)} · 在线 ${totalText} · 已监控 ${fmt(area.monitored_room_count)}</option>`;
       }).join('');
     }
 
     function renderSummary() {
       const payload = state.summary || {};
       const data = payload.summary || {};
+      const totalText = data.total_room_count_is_reliable
+        ? fmt(data.total_room_count)
+        : `${fmt(data.monitored_room_count)}+`;
       const metrics = [
-        ['分区在线房间', data.total_room_count],
+        ['分区在线房间', totalText],
         ['已监控房间', data.monitored_room_count],
         ['未覆盖估算', data.unmonitored_room_estimate],
         ['UP 数量', data.unique_up_count],
@@ -680,6 +686,7 @@ class LiveMonitorApiServer extends GetxService {
         ['分区刷新', fmt(data.last_area_refresh_at), ''],
         ['房间刷新', fmt(data.last_room_refresh_at), ''],
         ['采样', `${payload.sampling?.page_limit ?? '-'}页 / ${payload.sampling?.room_limit ?? '-'}房`, ''],
+        ['总量来源', data.total_room_count_is_reliable ? '接口总数' : '已观测房间', data.total_room_count_is_reliable ? 'good' : 'warn'],
         ['电脑地址', location.origin, ''],
       ];
       qs('statusChips').innerHTML = chips.map(([k, v, kind]) => `
@@ -690,14 +697,20 @@ class LiveMonitorApiServer extends GetxService {
     function renderCoverage() {
       const coverage = state.coverage || {};
       const counts = coverage.missing_field_counts || {};
+      const totalGapText = coverage.total_room_count_is_reliable
+        ? coverage.unmonitored_room_estimate
+        : '未知';
       qs('coverageChips').innerHTML = [
-        ['未覆盖房间估算', coverage.unmonitored_room_estimate, 'warn'],
+        ['未覆盖房间估算', totalGapText, 'warn'],
         ['字段缺口房间', coverage.rooms_with_missing_fields, 'warn'],
         ['陈旧房间', coverage.stale_room_count, 'warn'],
       ].concat(Object.entries(counts).map(([key, value]) => [key, value, value > 0 ? 'bad' : 'good']))
       .map(([k, v, kind]) => `<span class="chip ${kind}">${esc(k)}: ${fmt(v)}</span>`).join('');
 
       qs('coverageMissing').textContent = JSON.stringify({
+        total_room_count: coverage.total_room_count,
+        total_room_count_is_reliable: coverage.total_room_count_is_reliable,
+        reported_total_room_count_raw: coverage.reported_total_room_count_raw,
         unmonitored_room_estimate: coverage.unmonitored_room_estimate,
         stale_room_ids: coverage.stale_room_ids,
         top_gap_rooms: coverage.rooms,

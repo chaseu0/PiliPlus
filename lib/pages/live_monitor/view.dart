@@ -344,9 +344,11 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                       '未覆盖估算',
                       summary == null
                           ? '-'
-                          : (summary.totalRoomCount -
+                          : service.hasReliableReportedRoomTotal
+                          ? (summary.totalRoomCount -
                                     summary.monitoredRoomCount)
-                                .clamp(0, 999999),
+                                .clamp(0, 999999)
+                          : '未知',
                     ),
                   ],
                 ),
