@@ -510,8 +510,10 @@ class LiveMonitorService extends GetxService {
               groupName: group.name ?? area.parentName ?? '',
               areaName: area.name ?? '',
               iconUrl: area.pic,
-              reportedTotalRoomCount: meta?['reported_total_room_count'] ?? 0,
-              monitoredRoomCount: meta?['monitored_room_count'] ?? 0,
+              reportedTotalRoomCount: _asInt(
+                meta?['reported_total_room_count'],
+              ),
+              monitoredRoomCount: _asInt(meta?['monitored_room_count']),
               lastRefreshAt: _asDateTime(meta?['last_refresh_at']),
             ),
           );
