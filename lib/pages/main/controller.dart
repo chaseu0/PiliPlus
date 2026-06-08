@@ -79,9 +79,7 @@ class MainController extends GetxController
       Future<void>.delayed(const Duration(seconds: 1), () async {
         await LiveMonitorApiServer.instance.start();
         if (Pref.liveMonitorAutoStart) {
-          await LiveMonitorService.instance.startMonitoring(
-            forceRefresh: false,
-          );
+          await LiveMonitorService.instance.startMonitoring();
         } else {
           await LiveMonitorService.instance.ensureInitialized();
         }

@@ -419,7 +419,7 @@ class LiveMonitorService extends GetxService {
   Future<void>? _initFuture;
   Timer? _areaTimer;
   Timer? _roomTimer;
-  int _reportedTotalRoomCount = 0;
+  int _reportedTotalRoomCountRaw = 0;
   int _roomCursor = 0;
   final List<int> _priorityRooms = <int>[];
   final Set<String> _seenCommentIds = <String>{};
@@ -432,10 +432,10 @@ class LiveMonitorService extends GetxService {
   bool get showFirstFrame => Pref.liveMonitorShowFirstFrame;
 
   bool get hasReliableReportedRoomTotal =>
-      _isReliableReportedRoomTotal(_reportedTotalRoomCount);
+      _isReliableReportedRoomTotal(_reportedTotalRoomCountRaw);
 
   int get effectiveTotalRoomCount =>
-      hasReliableReportedRoomTotal ? _reportedTotalRoomCount : rooms.length;
+      hasReliableReportedRoomTotal ? _reportedTotalRoomCountRaw : rooms.length;
 
   set showFirstFrame(bool value) => Pref.liveMonitorShowFirstFrame = value;
 
@@ -594,7 +594,7 @@ class LiveMonitorService extends GetxService {
     Pref.liveMonitorSelectedParentAreaId = option.parentAreaId;
     Pref.liveMonitorSelectedAreaId = option.areaId;
     Pref.liveMonitorSelectedAreaName = option.areaName;
-    _reportedTotalRoomCount = option.reportedTotalRoomCount;
+    _reportedTotalRoomCountRaw = option.reportedTotalRoomCount;
     _roomCursor = 0;
     await _loadPersistedAreaSnapshot(option.parentAreaId, option.areaId);
     _rebuildSummary();
@@ -744,7 +744,7 @@ class LiveMonitorService extends GetxService {
           ? null
           : {
               'total_room_count': data.totalRoomCount,
-              'reported_total_room_count_raw': _reportedTotalRoomCount,
+              'reported_total_room_count_raw': _reportedTotalRoomCountRaw,
               'total_room_count_is_reliable': reliableTotal,
               'monitored_room_count': data.monitoredRoomCount,
               'unmonitored_room_estimate': unmonitoredEstimate,
@@ -815,7 +815,7 @@ class LiveMonitorService extends GetxService {
         .take(120)
         .toList();
     return {
-      'reported_total_room_count_raw': _reportedTotalRoomCount,
+      'reported_total_room_count_raw': _reportedTotalRoomCountRaw,
       'total_room_count': total,
       'total_room_count_is_reliable': reliableTotal,
       'reported_total_room_count': total,
@@ -1133,10 +1133,10 @@ class LiveMonitorService extends GetxService {
     );
     if (areaMeta.isNotEmpty) {
       final meta = areaMeta.first;
-      _reportedTotalRoomCount = _asInt(meta['reported_total_room_count']);
+      _reportedTotalRoomCountRaw = _asInt(meta['reported_total_room_count']);
       lastAreaRefreshAt.value = _asDateTime(meta['last_refresh_at']);
     } else {
-      _reportedTotalRoomCount = 0;
+      _reportedTotalRoomCountRaw = 0;
       lastAreaRefreshAt.value = null;
     }
     final roomRows = await _db!.query(
@@ -1269,16 +1269,13 @@ class LiveMonitorService extends GetxService {
         }
       }
       if (fetchedRooms.isNotEmpty) {
-        _reportedTotalRoomCount = _normalizeReportedRoomTotal(
-          totalCount,
-          observedCount: fetchedRooms.length,
-        );
+        _reportedTotalRoomCountRaw = totalCount ?? 0;
         rooms.assignAll(_sortRoomList(fetchedRooms.values));
         await _writeRooms(rooms);
         await _applyBatchStatus(rooms.toList());
         await _upsertAreaMeta(
           area: area,
-          reportedTotalRoomCount: _reportedTotalRoomCount,
+          reportedTotalRoomCount: _reportedTotalRoomCountRaw,
           monitoredRoomCount: rooms.length,
         );
         lastAreaRefreshAt.value = DateTime.now();
@@ -1828,17 +1825,6 @@ class LiveMonitorService extends GetxService {
 
   bool _isReliableReportedRoomTotal(int total) {
     return total > 0 && total < 10000000;
-  }
-
-  int _normalizeReportedRoomTotal(
-    int? total, {
-    required int observedCount,
-  }) {
-    final value = total ?? 0;
-    if (_isReliableReportedRoomTotal(value)) {
-      return value;
-    }
-    return observedCount;
   }
 
   Map<String, dynamic> _roomToJson(LiveMonitorRoomRecord room) {

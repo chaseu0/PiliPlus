@@ -140,9 +140,7 @@ void main() async {
   if (PlatformUtils.isMobile) {
     unawaited(LiveMonitorApiServer.instance.ensureStarted());
     if (Pref.liveMonitorAutoStart) {
-      unawaited(
-        LiveMonitorService.instance.startMonitoring(forceRefresh: false),
-      );
+      unawaited(LiveMonitorService.instance.startMonitoring());
     } else {
       unawaited(LiveMonitorService.instance.ensureInitialized());
     }
