@@ -11,9 +11,12 @@ import 'package:PiliPlus/pages/dynamics/controller.dart';
 import 'package:PiliPlus/pages/home/controller.dart';
 import 'package:PiliPlus/pages/mine/view.dart';
 import 'package:PiliPlus/services/account_service.dart';
+import 'package:PiliPlus/services/live_monitor_api_server.dart';
+import 'package:PiliPlus/services/live_monitor_service.dart';
 import 'package:PiliPlus/utils/extension/get_ext.dart';
 import 'package:PiliPlus/utils/extension/iterable_ext.dart';
 import 'package:PiliPlus/utils/feed_back.dart';
+import 'package:PiliPlus/utils/platform_utils.dart';
 import 'package:PiliPlus/utils/storage.dart';
 import 'package:PiliPlus/utils/storage_key.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
@@ -72,6 +75,18 @@ class MainController extends GetxController
   @override
   void onInit() {
     super.onInit();
+    if (PlatformUtils.isMobile) {
+      Future<void>.delayed(const Duration(seconds: 1), () async {
+        await LiveMonitorApiServer.instance.start();
+        if (Pref.liveMonitorAutoStart) {
+          await LiveMonitorService.instance.startMonitoring(
+            forceRefresh: false,
+          );
+        } else {
+          await LiveMonitorService.instance.ensureInitialized();
+        }
+      });
+    }
     if (Pref.autoUpdate) {
       Update.checkUpdate();
     }

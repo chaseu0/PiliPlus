@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:PiliPlus/services/live_monitor_service.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 
 class LiveMonitorApiServer extends GetxService {
@@ -19,7 +20,7 @@ class LiveMonitorApiServer extends GetxService {
   HttpServer? _server;
 
   final isRunning = false.obs;
-  final boundHost = '0.0.0.0'.obs;
+  final boundHost = '127.0.0.1'.obs;
   final boundPort = 0.obs;
   final requestCount = 0.obs;
   final lastError = RxnString();
@@ -48,21 +49,26 @@ class LiveMonitorApiServer extends GetxService {
     for (int offset = 0; offset < 8; offset++) {
       final port = preferredPort + offset;
       try {
-        _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+        _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
         boundPort.value = port;
         Pref.liveMonitorApiPort = port;
         isRunning.value = true;
         startedAt.value = DateTime.now();
         lastError.value = null;
+        debugPrint(
+          'LiveMonitorApiServer listening on http://${boundHost.value}:$port',
+        );
         _server!.listen(
           _handleRequest,
           onError: (Object error) {
             lastError.value = error.toString();
+            debugPrint('LiveMonitorApiServer request error: $error');
           },
         );
         return;
       } catch (error) {
         lastBindError = error;
+        debugPrint('LiveMonitorApiServer bind failed on $port: $error');
       }
     }
     lastError.value = 'HTTP 服务启动失败: $lastBindError';
