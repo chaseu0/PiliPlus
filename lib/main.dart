@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:PiliPlus/build_config.dart';
@@ -13,6 +14,8 @@ import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
 import 'package:PiliPlus/router/app_pages.dart';
 import 'package:PiliPlus/services/account_service.dart';
 import 'package:PiliPlus/services/download/download_service.dart';
+import 'package:PiliPlus/services/live_monitor_api_server.dart';
+import 'package:PiliPlus/services/live_monitor_service.dart';
 import 'package:PiliPlus/services/logger.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/utils/cache_manager.dart';
@@ -133,6 +136,17 @@ void main() async {
   Request();
   Request.setCookie();
   RequestUtils.syncHistoryStatus();
+
+  if (PlatformUtils.isMobile) {
+    unawaited(LiveMonitorApiServer.instance.ensureStarted());
+    if (Pref.liveMonitorAutoStart) {
+      unawaited(
+        LiveMonitorService.instance.startMonitoring(forceRefresh: false),
+      );
+    } else {
+      unawaited(LiveMonitorService.instance.ensureInitialized());
+    }
+  }
 
   SmartDialog.config.toast = SmartConfigToast(displayType: .onlyRefresh);
 
@@ -282,10 +296,7 @@ class MyApp extends StatelessWidget {
         loadingBuilder: (msg) => LoadingWidget(msg: msg),
         builder: _builder,
       ),
-      navigatorObservers: [
-        routeObserver,
-        FlutterSmartDialog.observer,
-      ],
+      navigatorObservers: [routeObserver, FlutterSmartDialog.observer],
       scrollBehavior: PlatformUtils.isDesktop
           ? const CustomScrollBehavior(desktopDragDevices)
           : null,
@@ -319,10 +330,7 @@ class MyApp extends StatelessWidget {
       );
     }
     if (PlatformUtils.isDesktop) {
-      return BackDetector(
-        onBack: _onBack,
-        child: child,
-      );
+      return BackDetector(onBack: _onBack, child: child);
     }
     return child;
   }

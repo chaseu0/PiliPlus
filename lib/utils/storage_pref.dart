@@ -128,22 +128,20 @@ abstract final class Pref {
   static set liveMonitorSelectedParentAreaId(int value) =>
       _setting.put(SettingBoxKey.liveMonitorSelectedParentAreaId, value);
 
-  static String get liveMonitorSelectedAreaName => _setting.get(
-    SettingBoxKey.liveMonitorSelectedAreaName,
-    defaultValue: '',
-  );
+  static String get liveMonitorSelectedAreaName =>
+      _setting.get(SettingBoxKey.liveMonitorSelectedAreaName, defaultValue: '');
 
   static set liveMonitorSelectedAreaName(String value) =>
       _setting.put(SettingBoxKey.liveMonitorSelectedAreaName, value);
 
   static int get liveMonitorAreaPageLimit =>
-      _setting.get(SettingBoxKey.liveMonitorAreaPageLimit, defaultValue: 8);
+      _setting.get(SettingBoxKey.liveMonitorAreaPageLimit, defaultValue: 15);
 
   static set liveMonitorAreaPageLimit(int value) =>
       _setting.put(SettingBoxKey.liveMonitorAreaPageLimit, value);
 
   static int get liveMonitorAreaRoomLimit =>
-      _setting.get(SettingBoxKey.liveMonitorAreaRoomLimit, defaultValue: 120);
+      _setting.get(SettingBoxKey.liveMonitorAreaRoomLimit, defaultValue: 500);
 
   static set liveMonitorAreaRoomLimit(int value) =>
       _setting.put(SettingBoxKey.liveMonitorAreaRoomLimit, value);
@@ -164,19 +162,35 @@ abstract final class Pref {
 
   static int get liveMonitorRoomRefreshSeconds => _setting.get(
     SettingBoxKey.liveMonitorRoomRefreshSeconds,
-    defaultValue: 30,
+    defaultValue: 15,
   );
 
   static set liveMonitorRoomRefreshSeconds(int value) =>
       _setting.put(SettingBoxKey.liveMonitorRoomRefreshSeconds, value);
 
-  static bool get liveMonitorShowFirstFrame => _setting.get(
-    SettingBoxKey.liveMonitorShowFirstFrame,
-    defaultValue: true,
-  );
+  static bool get liveMonitorShowFirstFrame =>
+      _setting.get(SettingBoxKey.liveMonitorShowFirstFrame, defaultValue: true);
 
   static set liveMonitorShowFirstFrame(bool value) =>
       _setting.put(SettingBoxKey.liveMonitorShowFirstFrame, value);
+
+  static bool get liveMonitorAutoStart =>
+      _setting.get(SettingBoxKey.liveMonitorAutoStart, defaultValue: true);
+
+  static set liveMonitorAutoStart(bool value) =>
+      _setting.put(SettingBoxKey.liveMonitorAutoStart, value);
+
+  static bool get liveMonitorApiAutoStart =>
+      _setting.get(SettingBoxKey.liveMonitorApiAutoStart, defaultValue: true);
+
+  static set liveMonitorApiAutoStart(bool value) =>
+      _setting.put(SettingBoxKey.liveMonitorApiAutoStart, value);
+
+  static int get liveMonitorApiPort =>
+      _setting.get(SettingBoxKey.liveMonitorApiPort, defaultValue: 8786);
+
+  static set liveMonitorApiPort(int value) =>
+      _setting.put(SettingBoxKey.liveMonitorApiPort, value);
 
   static set blackMids(Set<int> blackMidsSet) =>
       _localCache.put(LocalCacheKey.blackMids, blackMidsSet);
@@ -236,10 +250,8 @@ abstract final class Pref {
     }
     return SegmentType.values
         .map(
-          (item) => Pair(
-            first: item,
-            second: SkipType.values[list[item.index]],
-          ),
+          (item) =>
+              Pair(first: item, second: SkipType.values[list[item.index]]),
         )
         .toList();
   }
@@ -249,13 +261,11 @@ abstract final class Pref {
     if (list == null || list.length != SegmentType.values.length) {
       return SegmentType.values.map((i) => i.color).toList();
     }
-    return SegmentType.values.map(
-      (item) {
-        final String e = list[item.index];
-        final color = e.isNotEmpty ? int.tryParse('FF$e', radix: 16) : null;
-        return color != null ? Color(color) : item.color;
-      },
-    ).toList();
+    return SegmentType.values.map((item) {
+      final String e = list[item.index];
+      final color = e.isNotEmpty ? int.tryParse('FF$e', radix: 16) : null;
+      return color != null ? Color(color) : item.color;
+    }).toList();
   }
 
   static bool get feedBackEnable =>

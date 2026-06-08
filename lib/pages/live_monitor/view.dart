@@ -1,13 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:PiliPlus/models/common/image_type.dart';
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
+import 'package:PiliPlus/services/live_monitor_api_server.dart';
 import 'package:PiliPlus/services/live_monitor_service.dart';
 import 'package:PiliPlus/services/request_debug.dart';
 import 'package:PiliPlus/utils/num_utils.dart';
 import 'package:PiliPlus/utils/page_utils.dart';
+import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:PiliPlus/utils/storage_utils.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,7 @@ class LiveMonitorPage extends StatefulWidget {
 class _LiveMonitorPageState extends State<LiveMonitorPage>
     with AutomaticKeepAliveClientMixin {
   final service = LiveMonitorService.instance;
+  final apiServer = LiveMonitorApiServer.instance;
   final TextEditingController _commentFilterController =
       TextEditingController();
   final TextEditingController _keywordFilterController =
@@ -39,7 +41,12 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
   @override
   void initState() {
     super.initState();
-    service.startMonitoring();
+    apiServer.ensureStarted();
+    if (Pref.liveMonitorAutoStart) {
+      service.startMonitoring();
+    } else {
+      service.ensureInitialized();
+    }
   }
 
   @override
@@ -54,7 +61,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
     super.build(context);
     final theme = Theme.of(context);
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Scaffold(
         appBar: AppBar(
           titleSpacing: 12,
@@ -97,6 +104,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
             isScrollable: true,
             tabs: [
               Tab(text: '总览'),
+              Tab(text: '电脑访问'),
               Tab(text: '评论'),
               Tab(text: '帧墙'),
               Tab(text: '词库'),
@@ -107,6 +115,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
         body: TabBarView(
           children: [
             _buildOverviewTab(theme),
+            _buildApiTab(theme),
             _buildCommentsTab(theme),
             _buildFrameWallTab(theme),
             _buildKeywordsTab(theme),
@@ -170,6 +179,11 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                       _MetricChip('分区在线房间', summary.totalRoomCount),
                       _MetricChip('已监控房间', summary.monitoredRoomCount),
                       _MetricChip('已发现 UP', summary.uniqueUpCount),
+                      _MetricChip(
+                        '未覆盖估算',
+                        (summary.totalRoomCount - summary.monitoredRoomCount)
+                            .clamp(0, 999999),
+                      ),
                       _MetricChip('总评论', summary.totalCommentCount),
                       _MetricChip('命中评论', summary.totalMatchedCommentCount),
                       _MetricChip('命中房间', summary.matchedRoomCount),
@@ -193,6 +207,49 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          Obx(() {
+            final serverRunning = apiServer.isRunning.value;
+            return Ink(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                borderRadius: Style.mdRadius,
+                color: theme.colorScheme.surfaceContainerLow,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '电脑访问服务',
+                          style: theme.textTheme.titleSmall,
+                        ),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: () async {
+                          if (serverRunning) {
+                            await apiServer.stop();
+                          } else {
+                            await apiServer.start();
+                          }
+                        },
+                        child: Text(serverRunning ? '停止服务' : '启动服务'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    serverRunning
+                        ? 'ADB 转发: ${apiServer.adbForwardCommand}\n电脑打开: ${apiServer.desktopUrl}'
+                        : '服务尚未启动',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            );
+          }),
           const SizedBox(height: 12),
           _buildRankingCard(
             context,
@@ -226,6 +283,114 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                 onTap: () => _showRoomDetail(context, room),
                 onPrioritize: () => service.prioritizeRoom(room.roomId),
               ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
+  Widget _buildApiTab(ThemeData theme) {
+    return Obx(() {
+      final summary = service.summary.value;
+      final serverRunning = apiServer.isRunning.value;
+      final coverage = service.buildCoverageJson();
+      final missingCounts = Map<String, dynamic>.from(
+        coverage['missing_field_counts'] as Map? ?? const <String, dynamic>{},
+      );
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+        children: [
+          Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: Style.mdRadius,
+              color: theme.colorScheme.surfaceContainerLow,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '手机内置 API 服务',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ),
+                    FilledButton.tonal(
+                      onPressed: () => apiServer.start(forceRestart: true),
+                      child: const Text('重启服务'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _MetricChip('服务状态', serverRunning ? '运行中' : '已停止'),
+                    _MetricChip('端口', apiServer.boundPort.value),
+                    _MetricChip('请求数', apiServer.requestCount.value),
+                    _MetricChip(
+                      '监控状态',
+                      service.isRunning.value ? '抓取中' : '已暂停',
+                    ),
+                    _MetricChip(
+                      '分区',
+                      service.selectedArea.value?.areaName ?? '-',
+                    ),
+                    _MetricChip(
+                      '未覆盖估算',
+                      summary == null
+                          ? '-'
+                          : (summary.totalRoomCount -
+                                    summary.monitoredRoomCount)
+                                .clamp(0, 999999),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _DebugBlock(
+                  title: 'ADB 转发命令',
+                  value: serverRunning
+                      ? apiServer.adbForwardCommand
+                      : '服务未启动，暂无命令',
+                ),
+                _DebugBlock(
+                  title: '电脑浏览器地址',
+                  value: serverRunning ? apiServer.desktopUrl : '服务未启动',
+                ),
+                if (apiServer.lastError.value?.isNotEmpty == true)
+                  _DebugBlock(title: '服务错误', value: apiServer.lastError.value!),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: Style.mdRadius,
+              color: theme.colorScheme.surfaceContainerLow,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('缺口统计', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: missingCounts.entries
+                      .map((entry) => _MetricChip(entry.key, entry.value))
+                      .toList(),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '这部分会同步到电脑端页面，方便直接看到哪些字段还没抓到，以及大概还有多少房间未覆盖。',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
             ),
           ),
         ],
@@ -284,7 +449,8 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                     FilterChip(
                       selected: onlyMatched,
                       label: const Text('仅看命中'),
-                      onSelected: (value) => setState(() => onlyMatched = value),
+                      onSelected: (value) =>
+                          setState(() => onlyMatched = value),
                     ),
                   ],
                 ),
@@ -352,7 +518,8 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                                         .map(
                                           (word) => Chip(
                                             label: Text(word),
-                                            visualDensity: VisualDensity.compact,
+                                            visualDensity:
+                                                VisualDensity.compact,
                                           ),
                                         )
                                         .toList(),
@@ -419,7 +586,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                     onTap: () => PageUtils.toLiveRoom(room.roomId),
                     onLongPress: () async {
                       await service.prioritizeRoom(room.roomId);
-                      if (!mounted) {
+                      if (!context.mounted) {
                         return;
                       }
                       final updatedRoom = service.rooms.firstWhereOrNull(
@@ -468,7 +635,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '活跃 ${NumUtils.numFormat(room.activeOnline ?? room.displayOnline)} · 航海 ${NumUtils.numFormat(room.guardCount)}',
+                                          '房间在线 ${NumUtils.numFormat(room.roomOnline)} · 高能 ${NumUtils.numFormat(room.activeOnline)} · 航海 ${NumUtils.numFormat(room.guardCount)}',
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 12,
@@ -544,10 +711,8 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
                         ),
                         IconButton(
                           tooltip: '添加词语',
-                          onPressed: () => _showAddKeywordDialog(
-                            context,
-                            group: entry.key,
-                          ),
+                          onPressed: () =>
+                              _showAddKeywordDialog(context, group: entry.key),
                           icon: const Icon(Icons.add_circle_outline),
                         ),
                       ],
@@ -598,10 +763,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
               ),
               trailing: item.errorMessage == null
                   ? const Icon(Icons.chevron_right)
-                  : Icon(
-                      Icons.error_outline,
-                      color: theme.colorScheme.error,
-                    ),
+                  : Icon(Icons.error_outline, color: theme.colorScheme.error),
               onTap: () => _showDebugRecord(context, item),
             ),
           );
@@ -681,8 +843,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
         }
       }
       return true;
-    }).toList()
-      ..sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
+    }).toList()..sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
   }
 
   Future<void> _exportAll() async {
@@ -690,7 +851,8 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
     try {
       final content = await service.exportAllDataJson();
       await StorageUtils.saveBytes2File(
-        name: 'piliplus_live_monitor_${DateTime.now().millisecondsSinceEpoch}.json',
+        name:
+            'piliplus_live_monitor_${DateTime.now().millisecondsSinceEpoch}.json',
         bytes: Uint8List.fromList(utf8.encode(content)),
         allowedExtensions: const ['json'],
       );
@@ -833,7 +995,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
     if (result != null) {
       await service.updateSampling(
         nextPageLimit: result.$1.clamp(1, 20).toInt(),
-        nextRoomLimit: result.$2.clamp(10, 300).toInt(),
+        nextRoomLimit: result.$2.clamp(10, 1500).toInt(),
         nextPageSize: result.$3.clamp(10, 100).toInt(),
         nextAreaRefreshSeconds: result.$4.clamp(20, 600).toInt(),
         nextRoomRefreshSeconds: result.$5.clamp(10, 300).toInt(),
@@ -915,11 +1077,17 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           child: ListView(
             children: [
-              Text(record.label, style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                record.label,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 12),
               _DebugBlock(title: 'URL', value: record.url),
               _DebugBlock(title: 'cURL', value: record.curl ?? '-'),
-              _DebugBlock(title: 'Request Body', value: record.requestBody ?? '-'),
+              _DebugBlock(
+                title: 'Request Body',
+                value: record.requestBody ?? '-',
+              ),
               _DebugBlock(
                 title: 'Response Preview',
                 value: record.responsePreview ?? '-',
@@ -937,10 +1105,9 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
     BuildContext context,
     LiveMonitorRoomRecord room,
   ) async {
-    final roomComments = service.comments
-        .where((item) => item.roomId == room.roomId)
-        .toList()
-      ..sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
+    final roomComments =
+        service.comments.where((item) => item.roomId == room.roomId).toList()
+          ..sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
     await showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
@@ -961,6 +1128,7 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
               children: [
                 _MetricChip('房间号', room.roomId),
                 _MetricChip('展示热度', NumUtils.numFormat(room.displayOnline)),
+                _MetricChip('房间在线', NumUtils.numFormat(room.roomOnline)),
                 _MetricChip('活跃观众', NumUtils.numFormat(room.activeOnline)),
                 _MetricChip('累计观看', room.watchedText ?? '-'),
                 _MetricChip('粉丝', NumUtils.numFormat(room.followerCount)),
@@ -998,57 +1166,53 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
             if (roomComments.isEmpty)
               const Text('还没有抓到该房间评论')
             else
-              ...roomComments.take(60).map(
-                (item) => Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${item.userName} · ${_formatTime(item.capturedAt)}',
-                          style: Theme.of(context).textTheme.bodySmall,
+              ...roomComments
+                  .take(60)
+                  .map(
+                    (item) => Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${item.userName} · ${_formatTime(item.capturedAt)}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 4),
+                            Text.rich(
+                              _highlightText(
+                                Theme.of(context),
+                                item.text,
+                                item.matchedKeywords
+                                    .map((e) => e.split(':').last)
+                                    .toList(),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
-                        Text.rich(
-                          _highlightText(
-                            Theme.of(context),
-                            item.text,
-                            item.matchedKeywords
-                                .map((e) => e.split(':').last)
-                                .toList(),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
           ],
         ),
       ),
     );
   }
 
-  TextSpan _highlightText(
-    ThemeData theme,
-    String text,
-    List<String> keywords,
-  ) {
+  TextSpan _highlightText(ThemeData theme, String text, List<String> keywords) {
     if (keywords.isEmpty) {
-      return TextSpan(
-        text: text,
-        style: theme.textTheme.bodyMedium,
-      );
+      return TextSpan(text: text, style: theme.textTheme.bodyMedium);
     }
     final spans = <TextSpan>[];
-    final normalizedKeywords = keywords
-        .where((item) => item.trim().isNotEmpty)
-        .map((item) => item.toLowerCase())
-        .toSet()
-        .toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
+    final normalizedKeywords =
+        keywords
+            .where((item) => item.trim().isNotEmpty)
+            .map((item) => item.toLowerCase())
+            .toSet()
+            .toList()
+          ..sort((a, b) => b.length.compareTo(a.length));
     int cursor = 0;
     final lower = text.toLowerCase();
     while (cursor < text.length) {
@@ -1186,6 +1350,7 @@ class _RoomCoverageCard extends StatelessWidget {
                   _MetricChip('房间', room.roomId),
                   _MetricChip('状态', room.fetchState.label),
                   _MetricChip('展示热度', NumUtils.numFormat(room.displayOnline)),
+                  _MetricChip('房间在线', NumUtils.numFormat(room.roomOnline)),
                   _MetricChip('活跃观众', NumUtils.numFormat(room.activeOnline)),
                   _MetricChip('累计观看', room.watchedText ?? '-'),
                   _MetricChip('粉丝', NumUtils.numFormat(room.followerCount)),
@@ -1199,6 +1364,21 @@ class _RoomCoverageCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(99),
                 child: LinearProgressIndicator(value: room.coverageRatio),
               ),
+              if (room.missingFields.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: room.missingFields
+                      .map(
+                        (field) => Chip(
+                          label: Text(field),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
               if (room.lastError?.isNotEmpty == true) ...[
                 const SizedBox(height: 8),
                 Text(

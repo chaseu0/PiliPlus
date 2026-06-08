@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:PiliPlus/http/live.dart';
 import 'package:PiliPlus/http/loading_state.dart';
@@ -83,6 +84,7 @@ class LiveMonitorRoomRecord {
     required this.areaName,
     required this.fetchState,
     this.displayOnline,
+    this.roomOnline,
     this.activeOnline,
     this.watchedText,
     this.followerCount,
@@ -106,6 +108,7 @@ class LiveMonitorRoomRecord {
   final String areaName;
   final LiveMonitorFetchState fetchState;
   final int? displayOnline;
+  final int? roomOnline;
   final int? activeOnline;
   final String? watchedText;
   final int? followerCount;
@@ -123,21 +126,50 @@ class LiveMonitorRoomRecord {
   bool get hasMatchedComments => matchedCommentCount > 0;
   bool get hasMetrics =>
       displayOnline != null ||
+      roomOnline != null ||
       activeOnline != null ||
       followerCount != null ||
       guardCount != null;
+
+  List<String> get missingFields {
+    final missing = <String>[];
+    if (!hasFrame) {
+      missing.add('frame');
+    }
+    if (displayOnline == null) {
+      missing.add('display_online');
+    }
+    if (roomOnline == null) {
+      missing.add('room_online');
+    }
+    if (activeOnline == null) {
+      missing.add('active_online');
+    }
+    if (followerCount == null) {
+      missing.add('follower_count');
+    }
+    if (guardCount == null) {
+      missing.add('guard_count');
+    }
+    if (lastCommentAt == null && totalCommentCount <= 0) {
+      missing.add('comments');
+    }
+    return missing;
+  }
+
   double get coverageRatio {
     int ready = 0;
     if (hasFrame) ready++;
     if (displayOnline != null) ready++;
+    if (roomOnline != null) ready++;
     if (activeOnline != null) ready++;
     if (followerCount != null) ready++;
     if (guardCount != null) ready++;
     if (lastCommentAt != null || totalCommentCount > 0) ready++;
-    return ready / 6;
+    return ready / 7;
   }
 
-  int get rankingScore => activeOnline ?? displayOnline ?? 0;
+  int get rankingScore => activeOnline ?? roomOnline ?? displayOnline ?? 0;
 
   LiveMonitorRoomRecord copyWith({
     int? parentAreaId,
@@ -148,6 +180,7 @@ class LiveMonitorRoomRecord {
     String? areaName,
     LiveMonitorFetchState? fetchState,
     int? displayOnline,
+    int? roomOnline,
     int? activeOnline,
     String? watchedText,
     int? followerCount,
@@ -172,6 +205,7 @@ class LiveMonitorRoomRecord {
       areaName: areaName ?? this.areaName,
       fetchState: fetchState ?? this.fetchState,
       displayOnline: displayOnline ?? this.displayOnline,
+      roomOnline: roomOnline ?? this.roomOnline,
       activeOnline: activeOnline ?? this.activeOnline,
       watchedText: watchedText ?? this.watchedText,
       followerCount: followerCount ?? this.followerCount,
@@ -197,6 +231,7 @@ class LiveMonitorRoomRecord {
       'uname': uname,
       'area_name': areaName,
       'display_online': displayOnline,
+      'room_online': roomOnline,
       'active_online': activeOnline,
       'watched_text': watchedText,
       'follower_count': followerCount,
@@ -223,6 +258,7 @@ class LiveMonitorRoomRecord {
       uname: (map['uname'] ?? '').toString(),
       areaName: (map['area_name'] ?? '').toString(),
       displayOnline: _asNullableInt(map['display_online']),
+      roomOnline: _asNullableInt(map['room_online']),
       activeOnline: _asNullableInt(map['active_online']),
       watchedText: map['watched_text']?.toString(),
       followerCount: _asNullableInt(map['follower_count']),
@@ -312,7 +348,8 @@ class LiveMonitorCommentRecord {
       text: (map['text'] ?? '').toString(),
       source: (map['source'] ?? '').toString(),
       capturedAt:
-          _asDateTime(map['captured_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+          _asDateTime(map['captured_at']) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
       matchedKeywords: matchedKeywords,
       rawPayload: map['raw_payload']?.toString(),
     );
@@ -361,8 +398,8 @@ class LiveMonitorService extends GetxService {
 
   static LiveMonitorService? get maybeInstance =>
       Get.isRegistered<LiveMonitorService>()
-          ? Get.find<LiveMonitorService>()
-          : null;
+      ? Get.find<LiveMonitorService>()
+      : null;
 
   final isInitialized = false.obs;
   final isRunning = false.obs;
@@ -414,8 +451,9 @@ class LiveMonitorService extends GetxService {
   List<LiveMonitorRoomRecord> get matchedRoomRanking {
     final list = List<LiveMonitorRoomRecord>.from(rooms);
     list.sort((a, b) {
-      final matchedRank =
-          b.matchedCommentCount.compareTo(a.matchedCommentCount);
+      final matchedRank = b.matchedCommentCount.compareTo(
+        a.matchedCommentCount,
+      );
       if (matchedRank != 0) {
         return matchedRank;
       }
@@ -488,9 +526,7 @@ class LiveMonitorService extends GetxService {
   }
 
   Future<void> _refreshAreaOptionsInternal() async {
-    final res = await LiveHttp.liveAreaList(
-      options: _debugOptions('直播分区列表'),
-    );
+    final res = await LiveHttp.liveAreaList(options: _debugOptions('直播分区列表'));
     if (res case Success(:final response)) {
       final mergedMeta = await _loadAreaMetaMap();
       final flattened = <LiveMonitorAreaOption>[];
@@ -585,7 +621,9 @@ class LiveMonitorService extends GetxService {
     if (nextGroup.isEmpty || nextKeyword.isEmpty) {
       return;
     }
-    final list = List<String>.from(keywordGroups[nextGroup] ?? const <String>[]);
+    final list = List<String>.from(
+      keywordGroups[nextGroup] ?? const <String>[],
+    );
     if (!list.contains(nextKeyword)) {
       list.add(nextKeyword);
       keywordGroups[nextGroup] = list;
@@ -673,6 +711,193 @@ class LiveMonitorService extends GetxService {
       ),
     };
     return const JsonEncoder.withIndent('  ').convert(payload);
+  }
+
+  Map<String, dynamic> buildSummaryJson() {
+    final area = selectedArea.value;
+    final data = summary.value;
+    final unmonitoredEstimate = data == null
+        ? 0
+        : math.max(data.totalRoomCount - data.monitoredRoomCount, 0);
+    return {
+      'generated_at': DateTime.now().toIso8601String(),
+      'is_initialized': isInitialized.value,
+      'is_running': isRunning.value,
+      'is_refreshing_area': isRefreshingArea.value,
+      'is_refreshing_rooms': isRefreshingRooms.value,
+      'selected_area': area == null ? null : _areaToJson(area),
+      'sampling': {
+        'page_limit': pageLimit,
+        'room_limit': roomLimit,
+        'page_size': pageSize,
+        'area_refresh_seconds': areaRefreshSeconds,
+        'room_refresh_seconds': roomRefreshSeconds,
+      },
+      'summary': data == null
+          ? null
+          : {
+              'total_room_count': data.totalRoomCount,
+              'monitored_room_count': data.monitoredRoomCount,
+              'unmonitored_room_estimate': unmonitoredEstimate,
+              'unique_up_count': data.uniqueUpCount,
+              'total_comment_count': data.totalCommentCount,
+              'total_matched_comment_count': data.totalMatchedCommentCount,
+              'matched_room_count': data.matchedRoomCount,
+              'ready_frame_count': data.readyFrameCount,
+              'ready_metric_count': data.readyMetricCount,
+              'failed_room_count': data.failedRoomCount,
+              'loading_room_count': data.loadingRoomCount,
+              'last_area_refresh_at': data.lastAreaRefreshAt?.toIso8601String(),
+              'last_room_refresh_at': data.lastRoomRefreshAt?.toIso8601String(),
+            },
+      'coverage': buildCoverageJson(),
+      'rankings': {
+        'followers': followerRanking.take(10).map(_roomToJson).toList(),
+        'guards': guardRanking.take(10).map(_roomToJson).toList(),
+        'active': activeRanking.take(10).map(_roomToJson).toList(),
+        'matched': matchedRoomRanking.take(10).map(_roomToJson).toList(),
+      },
+      'load_error': loadError.value,
+    };
+  }
+
+  List<Map<String, dynamic>> buildAreaOptionsJson() {
+    return areaOptions.map(_areaToJson).toList();
+  }
+
+  Map<String, dynamic> buildCoverageJson() {
+    final total = summary.value?.totalRoomCount ?? _reportedTotalRoomCount;
+    final monitored = rooms.length;
+    final fieldMissing = <String, int>{
+      'frame': 0,
+      'display_online': 0,
+      'room_online': 0,
+      'active_online': 0,
+      'follower_count': 0,
+      'guard_count': 0,
+      'comments': 0,
+    };
+    final staleRooms = <int>[];
+    final now = DateTime.now();
+    for (final room in rooms) {
+      for (final field in room.missingFields) {
+        fieldMissing[field] = (fieldMissing[field] ?? 0) + 1;
+      }
+      final recent = room.lastCommentAt ?? room.lastMetricsAt;
+      if (recent == null || now.difference(recent).inMinutes >= 15) {
+        staleRooms.add(room.roomId);
+      }
+    }
+    final roomsWithMissingFields = rooms
+        .where((room) => room.missingFields.isNotEmpty)
+        .toList();
+    final gapRooms = roomsWithMissingFields
+        .where((room) => room.missingFields.isNotEmpty)
+        .map(
+          (room) => {
+            'room_id': room.roomId,
+            'uname': room.uname,
+            'title': room.title,
+            'missing_fields': room.missingFields,
+            'coverage_ratio': room.coverageRatio,
+          },
+        )
+        .take(120)
+        .toList();
+    return {
+      'reported_total_room_count': total,
+      'monitored_room_count': monitored,
+      'unmonitored_room_estimate': math.max(total - monitored, 0),
+      'rooms_with_missing_fields': roomsWithMissingFields.length,
+      'missing_field_counts': fieldMissing,
+      'stale_room_count': staleRooms.length,
+      'stale_room_ids': staleRooms.take(120).toList(),
+      'rooms': gapRooms,
+    };
+  }
+
+  List<Map<String, dynamic>> buildRoomsJson({
+    int? limit,
+    bool matchedOnly = false,
+    bool missingOnly = false,
+    int? roomId,
+    String? keyword,
+  }) {
+    final needle = keyword?.trim().toLowerCase();
+    Iterable<LiveMonitorRoomRecord> iterable = rooms;
+    if (roomId != null) {
+      iterable = iterable.where((item) => item.roomId == roomId);
+    }
+    if (matchedOnly) {
+      iterable = iterable.where((item) => item.matchedCommentCount > 0);
+    }
+    if (missingOnly) {
+      iterable = iterable.where((item) => item.missingFields.isNotEmpty);
+    }
+    if (needle != null && needle.isNotEmpty) {
+      iterable = iterable.where((item) {
+        final haystack = '${item.uname} ${item.title} ${item.areaName}'
+            .toLowerCase();
+        if (haystack.contains(needle)) {
+          return true;
+        }
+        return comments.any(
+          (comment) =>
+              comment.roomId == item.roomId &&
+              (comment.text.toLowerCase().contains(needle) ||
+                  comment.matchedKeywords.any(
+                    (word) => word.toLowerCase().contains(needle),
+                  )),
+        );
+      });
+    }
+    final data = iterable.map(_roomToJson).toList();
+    if (limit != null && limit > 0 && data.length > limit) {
+      return data.take(limit).toList();
+    }
+    return data;
+  }
+
+  List<Map<String, dynamic>> buildCommentsJson({
+    int? limit,
+    bool matchedOnly = false,
+    int? roomId,
+    String? keyword,
+  }) {
+    final needle = keyword?.trim().toLowerCase();
+    final data = comments
+        .where((item) {
+          if (matchedOnly && item.matchedKeywords.isEmpty) {
+            return false;
+          }
+          if (roomId != null && item.roomId != roomId) {
+            return false;
+          }
+          if (needle == null || needle.isEmpty) {
+            return true;
+          }
+          return item.text.toLowerCase().contains(needle) ||
+              item.userName.toLowerCase().contains(needle) ||
+              item.roomTitle.toLowerCase().contains(needle) ||
+              item.roomOwner.toLowerCase().contains(needle) ||
+              item.matchedKeywords.any(
+                (word) => word.toLowerCase().contains(needle),
+              );
+        })
+        .map(_commentToJson)
+        .toList();
+    if (limit != null && limit > 0 && data.length > limit) {
+      return data.take(limit).toList();
+    }
+    return data;
+  }
+
+  List<Map<String, dynamic>> buildDebugJson({int? limit}) {
+    final data = debugRecords.map(_debugRecordToJson).toList();
+    if (limit != null && limit > 0 && data.length > limit) {
+      return data.take(limit).toList();
+    }
+    return data;
   }
 
   Future<void> syncRealtimeDanmaku({
@@ -764,7 +989,7 @@ class LiveMonitorService extends GetxService {
     final dbPath = p.join(baseDir.path, 'piliplus_live_monitor.sqlite');
     _db = await openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE live_monitor_area (
@@ -789,6 +1014,7 @@ class LiveMonitorService extends GetxService {
             uname TEXT NOT NULL DEFAULT '',
             area_name TEXT NOT NULL DEFAULT '',
             display_online INTEGER,
+            room_online INTEGER,
             active_online INTEGER,
             watched_text TEXT,
             follower_count INTEGER,
@@ -846,6 +1072,13 @@ class LiveMonitorService extends GetxService {
         await db.execute(
           'CREATE INDEX idx_live_monitor_comment_room_time ON live_monitor_comment(room_id, captured_at DESC)',
         );
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE live_monitor_room ADD COLUMN room_online INTEGER',
+          );
+        }
       },
       onDowngrade: onDatabaseDowngradeDelete,
     );
@@ -909,7 +1142,9 @@ class LiveMonitorService extends GetxService {
       limit: 600,
     );
     comments.assignAll(
-      commentRows.map((item) => LiveMonitorCommentRecord.fromMap(item)).toList(),
+      commentRows
+          .map((item) => LiveMonitorCommentRecord.fromMap(item))
+          .toList(),
     );
     lastRoomRefreshAt.value = rooms
         .map((item) => item.lastCommentAt ?? item.lastMetricsAt)
@@ -977,29 +1212,31 @@ class LiveMonitorService extends GetxService {
               continue;
             }
             final existing = fetchedRooms[roomId] ?? roomMap[roomId];
-            fetchedRooms[roomId] = (existing ??
-                    LiveMonitorRoomRecord(
-                      roomId: roomId,
+            fetchedRooms[roomId] =
+                (existing ??
+                        LiveMonitorRoomRecord(
+                          roomId: roomId,
+                          parentAreaId: area.parentAreaId,
+                          areaId: area.areaId,
+                          uid: _asNullableInt(card.uid) ?? 0,
+                          title: card.title ?? '',
+                          uname: card.uname ?? '',
+                          areaName: card.areaName ?? area.areaName,
+                          fetchState: LiveMonitorFetchState.idle,
+                        ))
+                    .copyWith(
                       parentAreaId: area.parentAreaId,
                       areaId: area.areaId,
-                      uid: _asNullableInt(card.uid) ?? 0,
-                      title: card.title ?? '',
-                      uname: card.uname ?? '',
-                      areaName: card.areaName ?? area.areaName,
-                      fetchState: LiveMonitorFetchState.idle,
-                    ))
-                .copyWith(
-                  parentAreaId: area.parentAreaId,
-                  areaId: area.areaId,
-                  uid: _asNullableInt(card.uid) ?? existing?.uid ?? 0,
-                  title: card.title ?? existing?.title ?? '',
-                  uname: card.uname ?? existing?.uname ?? '',
-                  areaName: card.areaName ?? existing?.areaName ?? area.areaName,
-                  cover: card.cover,
-                  keyframe: card.systemCover,
-                  watchedText: card.watchedShow?.textLarge,
-                  lastSeenAt: DateTime.now(),
-                );
+                      uid: _asNullableInt(card.uid) ?? existing?.uid ?? 0,
+                      title: card.title ?? existing?.title ?? '',
+                      uname: card.uname ?? existing?.uname ?? '',
+                      areaName:
+                          card.areaName ?? existing?.areaName ?? area.areaName,
+                      cover: card.cover,
+                      keyframe: card.systemCover,
+                      watchedText: card.watchedShow?.textLarge,
+                      lastSeenAt: DateTime.now(),
+                    );
             if (fetchedRooms.length >= roomLimit) {
               break;
             }
@@ -1030,7 +1267,9 @@ class LiveMonitorService extends GetxService {
     }
   }
 
-  Future<void> _applyBatchStatus(List<LiveMonitorRoomRecord> targetRooms) async {
+  Future<void> _applyBatchStatus(
+    List<LiveMonitorRoomRecord> targetRooms,
+  ) async {
     final uids = targetRooms
         .map((item) => item.uid)
         .where((item) => item > 0)
@@ -1091,10 +1330,15 @@ class LiveMonitorService extends GetxService {
   }
 
   List<int> _pickRoomBatchIds() {
-    const int batchSize = 6;
+    final int batchSize = roomLimit >= 400
+        ? 16
+        : roomLimit >= 200
+        ? 12
+        : 8;
     final nextIds = <int>[];
     for (final roomId in _priorityRooms) {
-      if (rooms.any((item) => item.roomId == roomId) && !nextIds.contains(roomId)) {
+      if (rooms.any((item) => item.roomId == roomId) &&
+          !nextIds.contains(roomId)) {
         nextIds.add(roomId);
       }
       if (nextIds.length >= batchSize) {
@@ -1109,12 +1353,14 @@ class LiveMonitorService extends GetxService {
       if (captureRank != 0) {
         return captureRank;
       }
-      final stateRank = _stateRank(a.fetchState).compareTo(_stateRank(b.fetchState));
+      final stateRank = _stateRank(
+        a.fetchState,
+      ).compareTo(_stateRank(b.fetchState));
       if (stateRank != 0) {
         return stateRank;
       }
-      return (b.activeOnline ?? b.displayOnline ?? 0).compareTo(
-        a.activeOnline ?? a.displayOnline ?? 0,
+      return (b.activeOnline ?? b.roomOnline ?? b.displayOnline ?? 0).compareTo(
+        a.activeOnline ?? a.roomOnline ?? a.displayOnline ?? 0,
       );
     });
     if (sorted.isEmpty) {
@@ -1127,7 +1373,9 @@ class LiveMonitorService extends GetxService {
         nextIds.add(roomId);
       }
     }
-    _roomCursor = sorted.isEmpty ? 0 : (_roomCursor + batchSize) % sorted.length;
+    _roomCursor = sorted.isEmpty
+        ? 0
+        : (_roomCursor + batchSize) % sorted.length;
     return nextIds;
   }
 
@@ -1137,7 +1385,10 @@ class LiveMonitorService extends GetxService {
       return;
     }
     await _replaceRoom(
-      room.copyWith(fetchState: LiveMonitorFetchState.loading, clearError: true),
+      room.copyWith(
+        fetchState: LiveMonitorFetchState.loading,
+        clearError: true,
+      ),
       persist: true,
       writeSample: false,
     );
@@ -1146,6 +1397,24 @@ class LiveMonitorService extends GetxService {
       (item) => item.roomId == roomId,
       orElse: () => room,
     );
+    final roomInfoRes = await LiveHttp.liveRoomBaseInfo(
+      roomId: current.roomId,
+      options: _debugOptions('房间基础信息 ${current.roomId}'),
+    );
+    if (roomInfoRes case Success(:final response)) {
+      current = current.copyWith(
+        roomOnline: _asNullableInt(response['online']),
+        watchedText:
+            response['watched_show']?.toString() ??
+            response['watched_show_text']?.toString() ??
+            current.watchedText,
+        cover: response['user_cover']?.toString() ?? current.cover,
+        keyframe: response['keyframe']?.toString() ?? current.keyframe,
+        lastMetricsAt: DateTime.now(),
+      );
+    } else {
+      errors.add('房间基础信息: ${roomInfoRes.toString()}');
+    }
     if (current.uid > 0) {
       final onlineRes = await LiveHttp.liveOnlineGoldRank(
         roomId: current.roomId,
@@ -1184,7 +1453,9 @@ class LiveMonitorService extends GetxService {
       if (guardRes case Success(:final response)) {
         final info = response['info'];
         current = current.copyWith(
-          guardCount: info is Map ? _asNullableInt(info['num']) : current.guardCount,
+          guardCount: info is Map
+              ? _asNullableInt(info['num'])
+              : current.guardCount,
           lastMetricsAt: DateTime.now(),
         );
       } else {
@@ -1335,20 +1606,16 @@ class LiveMonitorService extends GetxService {
     required int monitoredRoomCount,
   }) async {
     final now = DateTime.now();
-    await _db!.insert(
-      'live_monitor_area',
-      {
-        'parent_area_id': area.parentAreaId,
-        'area_id': area.areaId,
-        'group_name': area.groupName,
-        'area_name': area.areaName,
-        'icon_url': area.iconUrl,
-        'reported_total_room_count': reportedTotalRoomCount,
-        'monitored_room_count': monitoredRoomCount,
-        'last_refresh_at': now.millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await _db!.insert('live_monitor_area', {
+      'parent_area_id': area.parentAreaId,
+      'area_id': area.areaId,
+      'group_name': area.groupName,
+      'area_name': area.areaName,
+      'icon_url': area.iconUrl,
+      'reported_total_room_count': reportedTotalRoomCount,
+      'monitored_room_count': monitoredRoomCount,
+      'last_refresh_at': now.millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     final index = areaOptions.indexWhere(
       (item) =>
           item.parentAreaId == area.parentAreaId && item.areaId == area.areaId,
@@ -1361,7 +1628,8 @@ class LiveMonitorService extends GetxService {
       );
     }
     if (selectedArea.value case final current?) {
-      if (current.parentAreaId == area.parentAreaId && current.areaId == area.areaId) {
+      if (current.parentAreaId == area.parentAreaId &&
+          current.areaId == area.areaId) {
         selectedArea.value = current.copyWith(
           reportedTotalRoomCount: reportedTotalRoomCount,
           monitoredRoomCount: monitoredRoomCount,
@@ -1415,7 +1683,11 @@ class LiveMonitorService extends GetxService {
           ? _reportedTotalRoomCount
           : rooms.length,
       monitoredRoomCount: rooms.length,
-      uniqueUpCount: rooms.map((item) => item.uid).where((item) => item > 0).toSet().length,
+      uniqueUpCount: rooms
+          .map((item) => item.uid)
+          .where((item) => item > 0)
+          .toSet()
+          .length,
       totalCommentCount: rooms.fold<int>(
         0,
         (sum, item) => sum + item.totalCommentCount,
@@ -1438,12 +1710,13 @@ class LiveMonitorService extends GetxService {
     );
   }
 
-  List<LiveMonitorRoomRecord> _sortRoomList(Iterable<LiveMonitorRoomRecord> items) {
+  List<LiveMonitorRoomRecord> _sortRoomList(
+    Iterable<LiveMonitorRoomRecord> items,
+  ) {
     final list = items.toList();
     list.sort((a, b) {
-      final scoreRank = (b.activeOnline ?? b.displayOnline ?? 0).compareTo(
-        a.activeOnline ?? a.displayOnline ?? 0,
-      );
+      final scoreRank = (b.activeOnline ?? b.roomOnline ?? b.displayOnline ?? 0)
+          .compareTo(a.activeOnline ?? a.roomOnline ?? a.displayOnline ?? 0);
       if (scoreRank != 0) {
         return scoreRank;
       }
@@ -1514,6 +1787,93 @@ class LiveMonitorService extends GetxService {
       );
     }
     return result;
+  }
+
+  Map<String, dynamic> _areaToJson(LiveMonitorAreaOption area) {
+    return {
+      'parent_area_id': area.parentAreaId,
+      'area_id': area.areaId,
+      'group_name': area.groupName,
+      'area_name': area.areaName,
+      'icon_url': area.iconUrl,
+      'reported_total_room_count': area.reportedTotalRoomCount,
+      'monitored_room_count': area.monitoredRoomCount,
+      'last_refresh_at': area.lastRefreshAt?.toIso8601String(),
+      'label': area.label,
+    };
+  }
+
+  Map<String, dynamic> _roomToJson(LiveMonitorRoomRecord room) {
+    return {
+      'room_id': room.roomId,
+      'parent_area_id': room.parentAreaId,
+      'area_id': room.areaId,
+      'uid': room.uid,
+      'uname': room.uname,
+      'title': room.title,
+      'area_name': room.areaName,
+      'fetch_state': room.fetchState.name,
+      'display_online': room.displayOnline,
+      'room_online': room.roomOnline,
+      'active_online': room.activeOnline,
+      'watched_text': room.watchedText,
+      'follower_count': room.followerCount,
+      'guard_count': room.guardCount,
+      'cover': room.cover,
+      'keyframe': room.keyframe,
+      'total_comment_count': room.totalCommentCount,
+      'matched_comment_count': room.matchedCommentCount,
+      'matched_ratio': room.totalCommentCount == 0
+          ? 0
+          : room.matchedCommentCount / room.totalCommentCount,
+      'coverage_ratio': room.coverageRatio,
+      'missing_fields': room.missingFields,
+      'real_audience_hints': {
+        'room_online': room.roomOnline,
+        'active_online': room.activeOnline,
+        'display_online': room.displayOnline,
+        'watched_text': room.watchedText,
+      },
+      'last_error': room.lastError,
+      'last_metrics_at': room.lastMetricsAt?.toIso8601String(),
+      'last_comment_at': room.lastCommentAt?.toIso8601String(),
+      'last_seen_at': room.lastSeenAt?.toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> _commentToJson(LiveMonitorCommentRecord comment) {
+    return {
+      'id': comment.id,
+      'parent_area_id': comment.parentAreaId,
+      'area_id': comment.areaId,
+      'room_id': comment.roomId,
+      'room_title': comment.roomTitle,
+      'room_owner': comment.roomOwner,
+      'user_id': comment.userId,
+      'user_name': comment.userName,
+      'text': comment.text,
+      'source': comment.source,
+      'captured_at': comment.capturedAt.toIso8601String(),
+      'matched': comment.matchedKeywords.isNotEmpty,
+      'matched_keywords': comment.matchedKeywords,
+      'raw_payload': comment.rawPayload,
+    };
+  }
+
+  Map<String, dynamic> _debugRecordToJson(RequestDebugRecord record) {
+    return {
+      'id': record.id,
+      'label': record.label,
+      'category': record.category,
+      'method': record.method,
+      'url': record.url,
+      'created_at': record.createdAt.toIso8601String(),
+      'curl': record.curl,
+      'request_body': record.requestBody,
+      'response_preview': record.responsePreview,
+      'error_message': record.errorMessage,
+      'status_code': record.statusCode,
+    };
   }
 }
 
