@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:PiliPlus/http/live.dart';
@@ -386,6 +387,13 @@ class LiveMonitorSummary {
   final DateTime? lastRoomRefreshAt;
 }
 
+class _LiveMonitorSqlFilter {
+  const _LiveMonitorSqlFilter({required this.where, required this.args});
+
+  final String? where;
+  final List<Object?> args;
+}
+
 class LiveMonitorService extends GetxService {
   LiveMonitorService._();
 
@@ -416,6 +424,7 @@ class LiveMonitorService extends GetxService {
   final lastRoomRefreshAt = Rxn<DateTime>();
 
   Database? _db;
+  String? _dbPath;
   Future<void>? _initFuture;
   Timer? _areaTimer;
   Timer? _roomTimer;
@@ -665,58 +674,103 @@ class LiveMonitorService extends GetxService {
   }
 
   Future<String> exportAllDataJson() async {
-    await ensureInitialized();
-    final db = _db!;
     final payload = {
-      'metadata': {
-        'exported_at': DateTime.now().toIso8601String(),
-        'selected_area': selectedArea.value == null
-            ? null
-            : {
-                'parent_area_id': selectedArea.value!.parentAreaId,
-                'area_id': selectedArea.value!.areaId,
-                'area_name': selectedArea.value!.areaName,
-                'group_name': selectedArea.value!.groupName,
-              },
-        'sampling': {
-          'page_limit': pageLimit,
-          'room_limit': roomLimit,
-          'page_size': pageSize,
-          'area_refresh_seconds': areaRefreshSeconds,
-          'room_refresh_seconds': roomRefreshSeconds,
-        },
-        'summary': summary.value == null
-            ? null
-            : {
-                'total_room_count': summary.value!.totalRoomCount,
-                'monitored_room_count': summary.value!.monitoredRoomCount,
-                'unique_up_count': summary.value!.uniqueUpCount,
-                'total_comment_count': summary.value!.totalCommentCount,
-                'total_matched_comment_count':
-                    summary.value!.totalMatchedCommentCount,
-              },
+      'ok': false,
+      'error': '整库 JSON 导出已停用，避免大表查询导致 OOM。请改用数据库快照导出或评论分页导出。',
+      'db_export': '/api/export/db',
+      'comment_export': '/api/export/comments/start',
+    };
+    return const JsonEncoder.withIndent('  ').convert(payload);
+  }
+
+  Future<String> getDatabasePath() async {
+    await ensureInitialized();
+    return _dbPath!;
+  }
+
+  Future<File> createDatabaseSnapshot({String? fileName}) async {
+    await ensureInitialized();
+    try {
+      await _db!.rawQuery('PRAGMA wal_checkpoint(FULL)');
+    } catch (_) {}
+    final sourcePath = _dbPath!;
+    final tempDir = await getTemporaryDirectory();
+    final snapshotName =
+        fileName ??
+        'piliplus_live_monitor_${DateTime.now().millisecondsSinceEpoch}.sqlite';
+    final snapshotPath = p.join(tempDir.path, snapshotName);
+    final snapshotFile = File(snapshotPath);
+    if (await snapshotFile.exists()) {
+      await snapshotFile.delete();
+    }
+    await File(sourcePath).copy(snapshotPath);
+    return snapshotFile;
+  }
+
+  Map<String, dynamic> buildExportMetadataJson() {
+    final area = selectedArea.value;
+    return {
+      'exported_at': DateTime.now().toIso8601String(),
+      'selected_area': area == null ? null : _areaToJson(area),
+      'sampling': {
+        'page_limit': pageLimit,
+        'room_limit': roomLimit,
+        'page_size': pageSize,
+        'area_refresh_seconds': areaRefreshSeconds,
+        'room_refresh_seconds': roomRefreshSeconds,
       },
+      'summary': buildSummaryJson()['summary'],
       'keyword_groups': keywordGroups.map(
         (key, value) => MapEntry(key, List<String>.from(value)),
       ),
-      'areas': await db.query(
-        'live_monitor_area',
-        orderBy: 'last_refresh_at DESC',
-      ),
-      'rooms': await db.query(
-        'live_monitor_room',
-        orderBy: 'COALESCE(active_online, display_online, 0) DESC',
-      ),
-      'comments': await db.query(
-        'live_monitor_comment',
-        orderBy: 'captured_at DESC',
-      ),
-      'samples': await db.query(
-        'live_monitor_room_sample',
-        orderBy: 'captured_at DESC',
-      ),
     };
-    return const JsonEncoder.withIndent('  ').convert(payload);
+  }
+
+  Future<int> countExportComments({
+    bool matchedOnly = false,
+    String? keyword,
+  }) async {
+    await ensureInitialized();
+    final filter = _buildCommentExportFilter(
+      matchedOnly: matchedOnly,
+      keyword: keyword,
+    );
+    final rows = await _db!.rawQuery(
+      'SELECT COUNT(*) AS count FROM live_monitor_comment'
+      '${filter.where == null ? '' : ' WHERE ${filter.where}'}',
+      filter.args,
+    );
+    return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  Future<List<Map<String, dynamic>>> loadExportCommentBatch({
+    required int limit,
+    required int offset,
+    bool matchedOnly = false,
+    String? keyword,
+    bool textOnly = false,
+  }) async {
+    await ensureInitialized();
+    final filter = _buildCommentExportFilter(
+      matchedOnly: matchedOnly,
+      keyword: keyword,
+    );
+    final rows = await _db!.query(
+      'live_monitor_comment',
+      where: filter.where,
+      whereArgs: filter.args.isEmpty ? null : filter.args,
+      orderBy: 'captured_at DESC, id DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return rows
+        .map(
+          (row) => _exportCommentRowJson(
+            LiveMonitorCommentRecord.fromMap(row),
+            textOnly: textOnly,
+          ),
+        )
+        .toList(growable: false);
   }
 
   Map<String, dynamic> buildSummaryJson() {
@@ -1002,6 +1056,7 @@ class LiveMonitorService extends GetxService {
   Future<void> _openDatabase() async {
     final baseDir = await getApplicationSupportDirectory();
     final dbPath = p.join(baseDir.path, 'piliplus_live_monitor.sqlite');
+    _dbPath = dbPath;
     _db = await openDatabase(
       dbPath,
       version: 2,
@@ -1882,6 +1937,59 @@ class LiveMonitorService extends GetxService {
       'matched_keywords': comment.matchedKeywords,
       'raw_payload': comment.rawPayload,
     };
+  }
+
+  Map<String, dynamic> _exportCommentRowJson(
+    LiveMonitorCommentRecord comment, {
+    required bool textOnly,
+  }) {
+    if (textOnly) {
+      return {'text': comment.text};
+    }
+    return _commentToJson(comment);
+  }
+
+  _LiveMonitorSqlFilter _buildCommentExportFilter({
+    bool matchedOnly = false,
+    String? keyword,
+  }) {
+    final clauses = <String>[];
+    final args = <Object?>[];
+    final area = selectedArea.value;
+    if (area != null) {
+      clauses.add('(parent_area_id = ? AND area_id = ?)');
+      args
+        ..add(area.parentAreaId)
+        ..add(area.areaId);
+    }
+    if (matchedOnly) {
+      clauses.add(
+        "(COALESCE(matched_keywords, '') <> '' AND COALESCE(matched_keywords, '') <> '[]')",
+      );
+    }
+    final needle = keyword?.trim().toLowerCase();
+    if (needle != null && needle.isNotEmpty) {
+      final like = '%$needle%';
+      clauses.add(
+        '('
+        'LOWER(text) LIKE ? OR '
+        'LOWER(user_name) LIKE ? OR '
+        'LOWER(room_title) LIKE ? OR '
+        'LOWER(room_owner) LIKE ? OR '
+        "LOWER(COALESCE(matched_keywords, '')) LIKE ?"
+        ')',
+      );
+      args
+        ..add(like)
+        ..add(like)
+        ..add(like)
+        ..add(like)
+        ..add(like);
+    }
+    return _LiveMonitorSqlFilter(
+      where: clauses.isEmpty ? null : clauses.join(' AND '),
+      args: args,
+    );
   }
 
   Map<String, dynamic> _debugRecordToJson(RequestDebugRecord record) {

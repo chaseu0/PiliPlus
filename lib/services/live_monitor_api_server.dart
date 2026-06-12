@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,7 @@ import 'package:PiliPlus/utils/storage_pref.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'package:path/path.dart' as p;
 
 class LiveMonitorApiServer extends GetxService {
   LiveMonitorApiServer._();
@@ -25,6 +27,8 @@ class LiveMonitorApiServer extends GetxService {
   final requestCount = 0.obs;
   final lastError = RxnString();
   final startedAt = Rxn<DateTime>();
+  final Map<String, _LiveMonitorCommentExportTask> _exportTasks =
+      <String, _LiveMonitorCommentExportTask>{};
 
   String get desktopUrl => 'http://127.0.0.1:${boundPort.value}/';
   String get adbForwardCommand =>
@@ -174,16 +178,84 @@ class LiveMonitorApiServer extends GetxService {
         );
         return;
       }
+      if (path == '/api/image') {
+        final targetUrl = request.uri.queryParameters['url'];
+        await _writeImageProxy(request.response, targetUrl);
+        return;
+      }
       if (path == '/api/export') {
-        final content = await LiveMonitorService.instance.exportAllDataJson();
-        _setCorsHeaders(request.response);
-        request.response.headers.contentType = ContentType.json;
-        request.response.headers.set(
-          'content-disposition',
-          'attachment; filename="piliplus_live_monitor_export.json"',
+        await _writeJson(request.response, {
+          'ok': true,
+          'message': '整库导出已改为 SQLite 快照下载，评论导出已改为分页后台任务。',
+          'db_export_url': '/api/export/db',
+          'comment_export_start_url': '/api/export/comments/start',
+          'comment_export_status_url': '/api/export/comments/task?id={task_id}',
+          'comment_export_download_url':
+              '/api/export/comments/download?id={task_id}',
+        });
+        return;
+      }
+      if (path == '/api/export/db') {
+        final snapshot = await LiveMonitorService.instance
+            .createDatabaseSnapshot();
+        await _writeFile(
+          request.response,
+          snapshot,
+          fileName: p.basename(snapshot.path),
+          contentType: ContentType('application', 'x-sqlite3'),
         );
-        request.response.write(content);
-        await request.response.close();
+        return;
+      }
+      if (path == '/api/export/comments/start' && request.method == 'POST') {
+        final body = await _readRequestBody(request);
+        final textOnly = body['text_only'] == true || body['text_only'] == 1;
+        final matchedOnly =
+            body['matched_only'] == true || body['matched_only'] == 1;
+        final keyword = (body['keyword'] ?? '').toString();
+        final task = await _startCommentExportTask(
+          textOnly: textOnly,
+          matchedOnly: matchedOnly,
+          keyword: keyword,
+        );
+        await _writeJson(request.response, task.toJson());
+        return;
+      }
+      if (path == '/api/export/comments/task') {
+        final taskId = request.uri.queryParameters['id'];
+        final task = _findExportTask(taskId);
+        if (task == null) {
+          await _writeJson(request.response, {
+            'ok': false,
+            'error': '导出任务不存在',
+          }, statusCode: HttpStatus.notFound);
+          return;
+        }
+        await _writeJson(request.response, task.toJson());
+        return;
+      }
+      if (path == '/api/export/comments/download') {
+        final taskId = request.uri.queryParameters['id'];
+        final task = _findExportTask(taskId);
+        if (task == null || task.outputPath == null) {
+          await _writeJson(request.response, {
+            'ok': false,
+            'error': '导出文件不存在',
+          }, statusCode: HttpStatus.notFound);
+          return;
+        }
+        if (task.status != _LiveMonitorCommentExportTaskStatus.completed) {
+          await _writeJson(request.response, {
+            'ok': false,
+            'error': '导出仍在进行中',
+          }, statusCode: HttpStatus.conflict);
+          return;
+        }
+        await _writeFile(
+          request.response,
+          File(task.outputPath!),
+          fileName: task.fileName,
+          contentType: ContentType('application', 'x-ndjson'),
+        );
         return;
       }
       if (path == '/api/control/start' && request.method == 'POST') {
@@ -331,6 +403,69 @@ class LiveMonitorApiServer extends GetxService {
     await response.close();
   }
 
+  Future<void> _writeFile(
+    HttpResponse response,
+    File file, {
+    required String fileName,
+    required ContentType contentType,
+  }) async {
+    _setCorsHeaders(response);
+    response.headers.contentType = contentType;
+    response.headers.set(
+      'content-disposition',
+      'attachment; filename="$fileName"',
+    );
+    response.headers.contentLength = await file.length();
+    await file.openRead().pipe(response);
+  }
+
+  Future<void> _writeImageProxy(
+    HttpResponse response,
+    String? targetUrl,
+  ) async {
+    final uri = Uri.tryParse(targetUrl ?? '');
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
+      await _writeJson(response, {
+        'ok': false,
+        'error': '无效图片地址',
+      }, statusCode: HttpStatus.badRequest);
+      return;
+    }
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
+    try {
+      final req = await client.getUrl(uri);
+      req.headers.set(
+        HttpHeaders.userAgentHeader,
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      );
+      req.headers.set(HttpHeaders.refererHeader, 'https://live.bilibili.com/');
+      req.headers.set(
+        HttpHeaders.acceptHeader,
+        'image/avif,image/webp,image/*,*/*;q=0.8',
+      );
+      final upstream = await req.close();
+      _setCorsHeaders(response);
+      response.statusCode = upstream.statusCode;
+      final upstreamType = upstream.headers.contentType;
+      response.headers.contentType =
+          upstreamType ?? ContentType('image', 'jpeg');
+      response.headers.set(
+        HttpHeaders.cacheControlHeader,
+        'public, max-age=60',
+      );
+      await upstream.pipe(response);
+    } catch (error) {
+      await _writeJson(response, {
+        'ok': false,
+        'error': error.toString(),
+      }, statusCode: HttpStatus.badGateway);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   void _setCorsHeaders(HttpResponse response) {
     response.headers.set(HttpHeaders.accessControlAllowOriginHeader, '*');
     response.headers.set(
@@ -358,6 +493,96 @@ class LiveMonitorApiServer extends GetxService {
       return value;
     }
     return int.tryParse('$value');
+  }
+
+  _LiveMonitorCommentExportTask? _findExportTask(String? taskId) {
+    if (taskId == null || taskId.trim().isEmpty) {
+      return null;
+    }
+    return _exportTasks[taskId];
+  }
+
+  Future<_LiveMonitorCommentExportTask> _startCommentExportTask({
+    required bool textOnly,
+    required bool matchedOnly,
+    required String keyword,
+  }) async {
+    final normalizedKeyword = keyword.trim();
+    final taskId = DateTime.now().microsecondsSinceEpoch.toString();
+    final fileName =
+        'piliplus_live_monitor_comments_${textOnly ? 'text' : 'full'}_$taskId.jsonl';
+    final task = _LiveMonitorCommentExportTask(
+      id: taskId,
+      fileName: fileName,
+      textOnly: textOnly,
+      matchedOnly: matchedOnly,
+      keyword: normalizedKeyword,
+    );
+    _exportTasks[taskId] = task;
+    unawaited(_runCommentExportTask(task));
+    return task;
+  }
+
+  Future<void> _runCommentExportTask(_LiveMonitorCommentExportTask task) async {
+    task
+      ..status = _LiveMonitorCommentExportTaskStatus.running
+      ..startedAt = DateTime.now();
+    final service = LiveMonitorService.instance;
+    IOSink? sink;
+    try {
+      final total = await service.countExportComments(
+        matchedOnly: task.matchedOnly,
+        keyword: task.keyword,
+      );
+      task.totalRows = total;
+      final tempDir = await Directory.systemTemp.createTemp(
+        'piliplus_live_monitor_export_',
+      );
+      final output = File(p.join(tempDir.path, task.fileName));
+      task.outputPath = output.path;
+      sink = output.openWrite();
+      sink.writeln(
+        jsonEncode({
+          'type': 'metadata',
+          'data': service.buildExportMetadataJson(),
+        }),
+      );
+      const pageSize = 500;
+      var offset = 0;
+      while (true) {
+        final batch = await service.loadExportCommentBatch(
+          limit: pageSize,
+          offset: offset,
+          matchedOnly: task.matchedOnly,
+          keyword: task.keyword,
+          textOnly: task.textOnly,
+        );
+        if (batch.isEmpty) {
+          break;
+        }
+        for (final row in batch) {
+          sink.writeln(jsonEncode({'type': 'comment', 'data': row}));
+        }
+        offset += batch.length;
+        task.exportedRows = offset;
+        await sink.flush();
+        if (await output.exists()) {
+          task.bytesWritten = await output.length();
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      }
+      await sink.flush();
+      task.bytesWritten = await output.length();
+      task.status = _LiveMonitorCommentExportTaskStatus.completed;
+      task.finishedAt = DateTime.now();
+    } catch (error) {
+      task
+        ..status = _LiveMonitorCommentExportTaskStatus.failed
+        ..error = error.toString()
+        ..finishedAt = DateTime.now();
+    } finally {
+      await sink?.close();
+    }
   }
 
   String _dashboardHtml() {
@@ -414,12 +639,15 @@ class LiveMonitorApiServer extends GetxService {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
       gap: 14px;
+      grid-auto-flow: row dense;
     }
-    .card { padding: 14px; }
+    .card { padding: 14px; min-width: 0; overflow: hidden; }
     .span-12 { grid-column: span 12; }
     .span-8 { grid-column: span 8; }
     .span-6 { grid-column: span 6; }
     .span-4 { grid-column: span 4; }
+    .span-7 { grid-column: span 7; }
+    .span-5 { grid-column: span 5; }
     .metrics {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -443,6 +671,7 @@ class LiveMonitorApiServer extends GetxService {
       gap: 10px;
       align-items: center;
     }
+    .toolbar { justify-content: flex-end; }
     button, select, input {
       border-radius: 12px;
       border: 1px solid var(--line);
@@ -512,8 +741,9 @@ class LiveMonitorApiServer extends GetxService {
     .comment-text { margin: 8px 0; line-height: 1.55; }
     .room-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
       gap: 12px;
+      align-items: start;
     }
     .room-card {
       border: 1px solid var(--line);
@@ -529,11 +759,39 @@ class LiveMonitorApiServer extends GetxService {
       background: #eadfce;
     }
     .room-card .body { padding: 12px; }
+    .export-panel {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.72);
+    }
+    .export-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .progress {
+      width: 100%;
+      height: 12px;
+      border-radius: 999px;
+      background: #eadfce;
+      overflow: hidden;
+    }
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #cb6a47 0%, var(--accent) 100%);
+      transition: width .25s ease;
+    }
     .small { font-size: 12px; }
     details { margin-top: 8px; }
     summary { cursor: pointer; color: var(--accent); }
     @media (max-width: 980px) {
-      .span-8, .span-6, .span-4 { grid-column: span 12; }
+      .span-8, .span-7, .span-6, .span-5, .span-4 { grid-column: span 12; }
     }
   </style>
 </head>
@@ -549,7 +807,7 @@ class LiveMonitorApiServer extends GetxService {
           <button id="startBtn">开始抓取</button>
           <button id="stopBtn" class="alt">停止抓取</button>
           <button id="refreshBtn" class="alt">立即刷新</button>
-          <a id="exportLink" href="/api/export" target="_blank">导出 JSON</a>
+          <a id="dbExportLink" href="/api/export/db" target="_blank">下载 SQLite</a>
         </div>
       </div>
       <div class="filters">
@@ -558,6 +816,17 @@ class LiveMonitorApiServer extends GetxService {
         <label><input type="checkbox" id="matchedOnly" /> 仅看命中</label>
         <label><input type="checkbox" id="missingOnly" /> 仅看缺口</label>
         <label><input type="checkbox" id="frameMode" checked /> 优先显示当前帧</label>
+      </div>
+      <div class="export-panel">
+        <div class="export-actions">
+          <button id="exportCommentTextBtn">导出纯评论</button>
+          <button id="exportCommentFullBtn" class="alt">导出评论明细 JSONL</button>
+          <a href="/api/export/db" target="_blank">整库直接拉 SQLite 到电脑</a>
+        </div>
+        <div class="small muted">纯评论只导出 `text` 字段；明细导出会分页增量写文件并实时显示进度。</div>
+        <div class="progress" style="margin-top:10px;"><span id="exportProgressBar"></span></div>
+        <div class="chips" id="exportStatusChips"></div>
+        <div class="mono" id="exportStatusText">尚未开始导出。</div>
       </div>
       <div class="chips" id="statusChips"></div>
       <div class="metrics" id="summaryMetrics"></div>
@@ -620,6 +889,7 @@ class LiveMonitorApiServer extends GetxService {
       debug: [],
       coverage: null,
       selectedArea: null,
+      exportTask: null,
     };
 
     const fmt = (value) => value == null || value === '' ? '-' : String(value);
@@ -642,6 +912,11 @@ class LiveMonitorApiServer extends GetxService {
         body: JSON.stringify(body),
       });
       return res.json();
+    }
+
+    function proxyImage(url) {
+      if (!url) return '';
+      return `/api/image?url=${encodeURIComponent(url)}`;
     }
 
     function renderAreas() {
@@ -719,11 +994,21 @@ class LiveMonitorApiServer extends GetxService {
 
     function renderRooms() {
       const showFrame = qs('frameMode').checked;
-      qs('roomGrid').innerHTML = state.rooms.slice(0, 24).map((room) => {
-        const image = showFrame ? (room.keyframe || room.cover || '') : (room.cover || room.keyframe || '');
+      qs('roomGrid').innerHTML = state.rooms.slice(0, 80).map((room) => {
+        const rawImage = showFrame ? (room.keyframe || room.cover || '') : (room.cover || room.keyframe || '');
+        const fallbackImage = showFrame ? (room.cover || '') : (room.keyframe || '');
+        const image = proxyImage(rawImage);
+        const fallback = proxyImage(fallbackImage);
         return `
           <article class="room-card">
-            <img src="${esc(image)}" alt="${esc(room.uname)}" />
+            <img
+              src="${esc(image)}"
+              alt="${esc(room.uname)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              data-fallback="${esc(fallback)}"
+              onerror="handleImageError(this)"
+            />
             <div class="body">
               <div style="display:flex;justify-content:space-between;gap:8px;">
                 <strong>${esc(room.uname)}</strong>
@@ -795,6 +1080,67 @@ class LiveMonitorApiServer extends GetxService {
       `).join('');
     }
 
+    function renderExportStatus() {
+      const task = state.exportTask;
+      if (!task) {
+        qs('exportProgressBar').style.width = '0%';
+        qs('exportStatusChips').innerHTML = '';
+        qs('exportStatusText').textContent = '尚未开始导出。';
+        return;
+      }
+      const percent = Math.max(0, Math.min(100, Math.round((task.progress || 0) * 100)));
+      qs('exportProgressBar').style.width = `${percent}%`;
+      const chips = [
+        ['状态', task.status, task.status === 'completed' ? 'good' : task.status === 'failed' ? 'bad' : 'warn'],
+        ['已导出', `${fmt(task.exported_rows)} / ${fmt(task.total_rows)}`, ''],
+        ['文件大小', fmt(task.bytes_written), ''],
+      ];
+      if (task.download_url) {
+        chips.push(['下载', task.download_url, 'good']);
+      }
+      qs('exportStatusChips').innerHTML = chips.map(([k, v, kind]) => `
+        <span class="chip ${kind}">${esc(k)}: ${esc(v)}</span>
+      `).join('');
+      qs('exportStatusText').textContent = JSON.stringify(task, null, 2);
+    }
+
+    async function startCommentExport(textOnly) {
+      const payload = {
+        text_only: textOnly,
+        matched_only: qs('matchedOnly').checked,
+        keyword: qs('keywordInput').value.trim(),
+      };
+      const task = await postJson('/api/export/comments/start', payload);
+      state.exportTask = task;
+      renderExportStatus();
+      pollExportTask(task.task_id);
+    }
+
+    async function pollExportTask(taskId) {
+      if (!taskId) return;
+      const tick = async () => {
+        const task = await getJson(`/api/export/comments/task?id=${encodeURIComponent(taskId)}`);
+        state.exportTask = task;
+        renderExportStatus();
+        if (task.status === 'running' || task.status === 'queued') {
+          setTimeout(tick, 700);
+        }
+      };
+      await tick();
+    }
+
+    function handleImageError(img) {
+      if (!img) return;
+      const fallback = img.dataset.fallback || '';
+      if (fallback && img.src !== location.origin + fallback && img.src !== fallback) {
+        img.src = fallback;
+        img.dataset.fallback = '';
+        return;
+      }
+      img.style.opacity = '0.25';
+      img.alt = `${img.alt || ''} (图片不可用)`;
+    }
+
     async function prioritizeRoom(roomId) {
       await postJson('/api/control/prioritize-room', { room_id: roomId });
       await refreshData();
@@ -825,6 +1171,7 @@ class LiveMonitorApiServer extends GetxService {
       renderRooms();
       renderComments();
       renderDebug();
+      renderExportStatus();
     }
 
     qs('startBtn').addEventListener('click', async () => {
@@ -848,6 +1195,8 @@ class LiveMonitorApiServer extends GetxService {
     qs('matchedOnly').addEventListener('change', refreshData);
     qs('missingOnly').addEventListener('change', refreshData);
     qs('frameMode').addEventListener('change', renderRooms);
+    qs('exportCommentTextBtn').addEventListener('click', () => startCommentExport(true));
+    qs('exportCommentFullBtn').addEventListener('click', () => startCommentExport(false));
 
     refreshData();
     setInterval(refreshData, 12000);
@@ -855,5 +1204,68 @@ class LiveMonitorApiServer extends GetxService {
 </body>
 </html>
 ''';
+  }
+}
+
+enum _LiveMonitorCommentExportTaskStatus {
+  queued,
+  running,
+  completed,
+  failed,
+}
+
+class _LiveMonitorCommentExportTask {
+  _LiveMonitorCommentExportTask({
+    required this.id,
+    required this.fileName,
+    required this.textOnly,
+    required this.matchedOnly,
+    required this.keyword,
+  });
+
+  final String id;
+  final String fileName;
+  final bool textOnly;
+  final bool matchedOnly;
+  final String keyword;
+
+  _LiveMonitorCommentExportTaskStatus status =
+      _LiveMonitorCommentExportTaskStatus.queued;
+  int totalRows = 0;
+  int exportedRows = 0;
+  int bytesWritten = 0;
+  String? outputPath;
+  String? error;
+  DateTime? startedAt;
+  DateTime? finishedAt;
+
+  double? get progress {
+    if (totalRows <= 0) {
+      return status == _LiveMonitorCommentExportTaskStatus.completed ? 1 : 0;
+    }
+    return exportedRows / totalRows;
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'ok': status != _LiveMonitorCommentExportTaskStatus.failed,
+      'task_id': id,
+      'status': status.name,
+      'file_name': fileName,
+      'text_only': textOnly,
+      'matched_only': matchedOnly,
+      'keyword': keyword,
+      'total_rows': totalRows,
+      'exported_rows': exportedRows,
+      'progress': progress,
+      'bytes_written': bytesWritten,
+      'download_url': status == _LiveMonitorCommentExportTaskStatus.completed
+          ? '/api/export/comments/download?id=$id'
+          : null,
+      'output_path': outputPath,
+      'started_at': startedAt?.toIso8601String(),
+      'finished_at': finishedAt?.toIso8601String(),
+      'error': error,
+    };
   }
 }

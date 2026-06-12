@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:PiliPlus/models/common/image_type.dart';
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/image/network_img_layer.dart';
@@ -849,14 +847,46 @@ class _LiveMonitorPageState extends State<LiveMonitorPage>
   }
 
   Future<void> _exportAll() async {
-    SmartDialog.showLoading(msg: '正在导出...');
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.storage_outlined),
+              title: const Text('导出 SQLite 数据库'),
+              subtitle: const Text('直接导出整库快照，避免评论大表 JSON OOM'),
+              onTap: () => Get.back(result: 'db'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link_outlined),
+              title: const Text('复制电脑导出地址'),
+              subtitle: const Text('评论分页导出和整库下载请在电脑面板完成'),
+              onTap: () => Get.back(result: 'desktop'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null) {
+      return;
+    }
+    if (action == 'desktop') {
+      await Clipboard.setData(ClipboardData(text: apiServer.desktopUrl));
+      SmartDialog.showToast('电脑面板地址已复制');
+      return;
+    }
+    SmartDialog.showLoading(msg: '正在导出数据库...');
     try {
-      final content = await service.exportAllDataJson();
-      await StorageUtils.saveBytes2File(
+      final snapshot = await service.createDatabaseSnapshot();
+      await StorageUtils.saveFileFromPath(
+        sourcePath: snapshot.path,
         name:
-            'piliplus_live_monitor_${DateTime.now().millisecondsSinceEpoch}.json',
-        bytes: Uint8List.fromList(utf8.encode(content)),
-        allowedExtensions: const ['json'],
+            'piliplus_live_monitor_${DateTime.now().millisecondsSinceEpoch}.sqlite',
+        allowedExtensions: const ['sqlite', 'db'],
       );
     } finally {
       SmartDialog.dismiss();

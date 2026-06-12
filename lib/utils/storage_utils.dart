@@ -31,4 +31,33 @@ abstract final class StorageUtils {
       SmartDialog.showToast("保存失败: $e");
     }
   }
+
+  static Future<void> saveFileFromPath({
+    required String sourcePath,
+    required String name,
+    required List<String> allowedExtensions,
+    FileType type = FileType.custom,
+  }) async {
+    try {
+      final path = await FilePicker.saveFile(
+        allowedExtensions: allowedExtensions,
+        type: type,
+        fileName: name,
+        bytes: PlatformUtils.isDesktop ? Uint8List(0) : Uint8List(0),
+      );
+      if (path == null) {
+        SmartDialog.showToast("取消保存");
+        return;
+      }
+      final source = File(sourcePath);
+      final target = File(path);
+      if (await target.exists()) {
+        await target.delete();
+      }
+      await source.openRead().pipe(target.openWrite());
+      SmartDialog.showToast("已保存");
+    } catch (e) {
+      SmartDialog.showToast("保存失败: $e");
+    }
+  }
 }
